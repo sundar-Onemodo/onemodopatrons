@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Dimensions,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 
 const cameraData = [
@@ -21,7 +21,7 @@ const cameraData = [
 ];
 
 export default function App() {
-  const [selectedCamera, setSelectedCamera] = useState(null);
+  const [selectedCamera, setSelectedCamera] = useState<any>(null);
 
   const handleBack = () => {
     setSelectedCamera(null); // Go back to camera list

@@ -18,7 +18,7 @@ import { RootState } from './store/store';
 const API_URL = BASE_URL + 'attendancelist';
 
 export default function AttendanceScreen() {
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const { authToken, employeeId, companyId } = useSelector(
@@ -33,9 +33,9 @@ export default function AttendanceScreen() {
     setLoading(true);
     try {
       const formData = new FormData();
-      formData.append('token', authToken);
-      formData.append('employee_id', employeeId);
-      formData.append('company_id', companyId);
+      formData.append('token', authToken || '');
+      formData.append('employee_id', employeeId || '');
+      formData.append('company_id', companyId || '');
 
       const response = await axios.post(API_URL, formData, {
         headers: {
@@ -46,7 +46,7 @@ export default function AttendanceScreen() {
 
       if (response.data?.status === 'success') {
         const sortedData = response.data.data.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          (a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
         setSessions(sortedData);
       } else {
@@ -59,7 +59,7 @@ export default function AttendanceScreen() {
     }
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: any) => {
     try {
       const date = new Date(dateString);
       return format(date, 'dd MMM yyyy');
@@ -68,7 +68,7 @@ export default function AttendanceScreen() {
     }
   };
 
-  const formatTime = (timeString) => {
+  const formatTime = (timeString: any) => {
     if (timeString === '0000-00-00 00:00:00') return '--';
     try {
       const timePart = timeString.split(' ')[1];
@@ -79,7 +79,7 @@ export default function AttendanceScreen() {
     }
   };
 
-  const renderItem = ({ item }) => {
+  const renderItem = ({ item }: { item: any }) => {
     const isPresent = item.present_status?.toLowerCase() === 'present';
     const backgroundColor = isPresent ? '#E8F5E9' : '#FFEBEE';
     const borderColor = isPresent ? '#C8E6C9' : '#FFCDD2';
@@ -127,7 +127,7 @@ export default function AttendanceScreen() {
 
   // Convert attendance to calendar markings
   const getMarkedDates = () => {
-    const marks = {};
+    const marks: any = {};
     sessions.forEach((item) => {
       const date = item.date;
       const isPresent = item.present_status?.toLowerCase() === 'present';

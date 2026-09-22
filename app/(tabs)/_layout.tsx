@@ -1,5 +1,5 @@
-// app/_layout.tsx or wherever you define the Tabs
-import { FontAwesome, Ionicons, MaterialCommunityIcons, SimpleLineIcons } from '@expo/vector-icons';
+// app/(tabs)/_layout.tsx
+import { MaterialCommunityIcons, SimpleLineIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -23,22 +23,21 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
           }
         };
 
-        const iconColor = isFocused ? '#fff' : '#fff';
+        const iconColor = '#fff';
 
         let icon;
         if (route.name === 'index') {
-          icon = <Ionicons name="home" size={20} color={iconColor} />;
-        } else if (route.name === 'attendance') {
-          icon = <FontAwesome name="calendar" size={20} color={iconColor} />;
-        } 
-        else if (route.name === 'boom') {
-          icon =
-        <MaterialCommunityIcons name="boom-gate-outline" size={22} color={iconColor} />
-        }
-        else {
+          icon = <MaterialCommunityIcons name="view-dashboard-outline" size={22} color={iconColor} />;
+        } else if (route.name === 'boom') {
+          icon = <MaterialCommunityIcons name="boom-gate-outline" size={22} color={iconColor} />;
+        } else if (route.name === 'logs') {
+          icon = <MaterialCommunityIcons name="file-document-outline" size={22} color={iconColor} />;
+        } else if (route.name === 'own-vehicles') {
+          icon = <MaterialCommunityIcons name="car-cog" size={22} color={iconColor} />;
+        } else {
           icon = <SimpleLineIcons name="user" size={20} color={iconColor} />;
         }
-                                               
+
         return (
           <TouchableOpacity
             key={index}
@@ -68,9 +67,10 @@ export default function TabLayout() {
         headerShown: false,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home' }} />
-      <Tabs.Screen name="attendance" options={{ title: 'Attendance' }} />
-      <Tabs.Screen name="boom" options={{ title: 'boom' }} />
+      <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
+      <Tabs.Screen name="boom" options={{ title: 'Gate Control' }} />
+      <Tabs.Screen name="logs" options={{ title: 'Logs' }} />
+      <Tabs.Screen name="own-vehicles" options={{ title: 'Own Vehicles' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
@@ -81,32 +81,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     backgroundColor: '#0f5f3c',
-    borderRadius: 40,
-    padding: 8,
-    margin: 5,
+    borderRadius: 35,
+    padding: 6,
+    margin: 8,
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 10 : 20,
-    left: 20,
-    right: 20,
-    elevation: 5,
+    bottom: Platform.OS === 'ios' ? 15 : 20,
+    left: 10,
+    right: 10,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
   },
   tabButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 30,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 25,
   },
   activeTab: {
     backgroundColor: '#d4b262',
   },
   tabText: {
     color: '#fff',
-    marginLeft: 8,
+    marginLeft: 6,
     fontWeight: '600',
+    fontSize: 12,
   },
 });

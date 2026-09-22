@@ -46,9 +46,9 @@ const { authToken: token, employeeId, companyId } = useSelector(
     const formData = new FormData();
     formData.append('password', password);
     formData.append('confirmpassword', confirmPassword);
-    formData.append('token', token);
-    formData.append('employee_id', employeeId);
-    formData.append('company_id', companyId);
+    formData.append('token', token || '');
+    formData.append('employee_id', employeeId || '');
+    formData.append('company_id', companyId || '');
 
     const response = await axios.post(
       BASE_URL+'setemployeepassword',

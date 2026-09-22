@@ -36,7 +36,7 @@ export default function RootLayout() {
         {rehydrated && (
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <MainLayout />
-            <StatusBar style="auto" />
+            <StatusBar style="light" backgroundColor="#0f5f3c" />
           </ThemeProvider>
         )}
       </PersistGate>

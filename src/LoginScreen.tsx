@@ -27,6 +27,7 @@ import {
 } from "react-native";
 import { useDispatch } from "react-redux";
 import { BASE_URL } from "./components/BaseUrlApi";
+import { fetchAndSaveBoomSettings } from "./utils/doorController";
 
 // ✅ Proper JWT payload decoder
 const decryptToken = (token: string) => {
@@ -89,6 +90,9 @@ export default function LoginFlow() {
           dispatch(setShifthours(data.employee.shift_hour || ""));
           dispatch(setEmployeeId(payload.employee_id));
           dispatch(setAuthToken(data.token));
+
+          // Prefetch and cache boom settings in background
+          fetchAndSaveBoomSettings(payload.company_id, data.token);
 
           console.log("Decoded Token Payload:", payload);
           if (data.valid.is_login === "SetPassword") {

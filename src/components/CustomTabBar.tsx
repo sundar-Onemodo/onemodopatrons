@@ -36,7 +36,7 @@ export default function CustomTabBar() {
             <TouchableOpacity
               key={index}
               style={[styles.tabButton, isFocused && styles.activeTab]}
-              onPress={() => router.push(`/(tabs)/${tab.name}`)}
+              onPress={() => router.push(`/(tabs)/${tab.name}` as any)}
               activeOpacity={0.8}
             >
               {tab.icon === "user" ? (

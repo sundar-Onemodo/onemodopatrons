@@ -1,82 +1,45 @@
-import AdPopup from "@/src/components/AdPopup";
 import { BASE_URL } from "@/src/components/BaseUrlApi";
-import { addSession } from "@/src/store/attendanceSlice";
-import {
-  resetAuth,
-  setAuthToken,
-  setSignupCountry,
-  setTotalWorkedHours,
-} from "@/src/store/authSlice";
+import { resetAuth } from "@/src/store/authSlice";
 import { RootState } from "@/src/store/store";
-import { AntDesign } from "@expo/vector-icons";
+import { resolveImageUrl } from "@/src/utils/imageUtils";
+import { AntDesign, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
-import * as Location from "expo-location";
-import { router } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import { router, useFocusEffect } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import moment from "moment";
-import React, { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
-  Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 
-const ALLOWED_LAT = 13.04487;
-const ALLOWED_LON = 80.24769;
-const RADIUS_METERS = 100;
-// 13.012369612196736, 80.24011857185882
-// 13.04487008728443, 80.24769333074165 -- current location
+const { width } = Dimensions.get("window");
 
 export default function HomeScreen() {
-  const [location, setLocation] = useState(null);
-  const [checkedIn, setCheckedIn] = useState(false);
-  const [checkInTime, setCheckInTime] = useState<moment.Moment | null>(null);
-  const [checkOutTime, setCheckOutTime] = useState(null);
-  const [totalHours, setTotalHours] = useState(null);
+  const insets = useSafeAreaInsets();
+  const [pendingCount, setPendingCount] = useState(0);
+  const [exitedCount, setExitedCount] = useState(0);
+  const [recentVehicles, setRecentVehicles] = useState<any[]>([]);
   const [time, setTime] = useState(moment().format("HH:mm A"));
-  const [locationName, setLocationName] = useState("");
-  const [isInAllowedLocation, setIsInAllowedLocation] = useState(false);
-  const [showPunchOutModal, setShowPunchOutModal] = useState(false);
-  const [locationIntervalId, setLocationIntervalId] = useState(null);
-  const [introStep, setIntroStep] = useState(1); // 0 = not showing, 1 = profile, etc.
-  const [remainingShiftTime, setRemainingShiftTime] = useState<string | null>(
-    null
-  );
-  const countdownInterval = useRef<NodeJS.Timeout | null>(null);
+  const locationName = "Secure Gate Terminal";
+  const [loading, setLoading] = useState(false);
 
   const dispatch = useDispatch();
-
-  const { authToken, employeeId, companyId, shiftHour,username } = useSelector(
+  const { authToken, username, companyId } = useSelector(
     (state: RootState) => state.auth
   );
-// console.log('CHECK ALL DATA', authToken, employeeId, companyId, shiftHour);
-  
-  const [showAd, setShowAd] = useState(false);
-
-  useEffect(() => {
-    const checkAdShown = async () => {
-      const shown = await AsyncStorage.getItem("adShown");
-      if (!shown) {
-        // Show ad after 30 seconds of app opening
-        const timer = setTimeout(() => {
-          setShowAd(true);
-        }, 30000); // 30 seconds delay
-
-        return () => clearTimeout(timer);
-      }
-    };
-          setShowAd(true);
-
-    checkAdShown();
-  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -85,401 +48,95 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const checkFirstTime = async () => {
-      const hasSeenIntro = await AsyncStorage.getItem("hasSeenHomeIntro");
-      if (!hasSeenIntro) {
-        setIntroStep(1); // Start walkthrough
-      }
-    };
-    checkFirstTime();
-  }, []);
-
-  useEffect(() => {
-    let intervalId;
-
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Location permission denied");
-        return;
-      }
-
-      let hasGeocoded = false; // 👈 Flag to prevent repeated reverse geocoding
-
-      const updateLocation = async () => {
-        try {
-          const loc = await Location.getCurrentPositionAsync({});
-          setLocation(loc.coords);
-
-          const distance = getDistance(
-            loc.coords.latitude,
-            loc.coords.longitude,
-            ALLOWED_LAT,
-            ALLOWED_LON
-          );
-          const isInside = distance <= RADIUS_METERS;
-          setIsInAllowedLocation(isInside);
-
-          // Only reverse geocode once
-          if (!hasGeocoded && !locationName) {
-            const [place] = await Location.reverseGeocodeAsync(loc.coords);
-            if (place) {
-              const name = `${place.name || ""}, ${place.city || ""}`.trim();
-              setLocationName(name);
-              dispatch(setSignupCountry(name));
-              hasGeocoded = true;
-            }
-          }
-
-          if (!isInside && checkedIn) {
-            handleCheckOut();
-            Alert.alert("Checked out", "You left the allowed location.");
-          }
-        } catch (err) {
-          console.error("Location error:", err);
-        }
-      };
-
-      await updateLocation();
-      intervalId = setInterval(updateLocation, 10000); // Still checks location every 10 sec
-      setLocationIntervalId(intervalId);
-    })();
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, []);
-
-  useEffect(() => {
-    const restoreCheckInState = async () => {
-      try {
-        const storedCheckedIn = await AsyncStorage.getItem("checkedIn");
-        const storedCheckInTime = await AsyncStorage.getItem("checkInTime");
-
-        if (storedCheckedIn === "true" && storedCheckInTime) {
-          setCheckedIn(true);
-          setCheckInTime(moment(storedCheckInTime));
-        }
-      } catch (err) {
-        console.error("Error restoring check-in state:", err);
-      }
-    };
-
-    const restoreCountdown = async () => {
-      const start = await AsyncStorage.getItem("shiftCountdownStart");
-      const total = await AsyncStorage.getItem("shiftSeconds");
-      if (!start || !total) return;
-
-      const elapsed = Math.floor((Date.now() - parseInt(start)) / 1000);
-      let remaining = parseInt(total) - elapsed;
-
-      if (remaining > 0) {
-        countdownInterval.current = setInterval(() => {
-          remaining -= 1;
-          const h = Math.floor(remaining / 3600);
-          const m = Math.floor((remaining % 3600) / 60);
-          const s = remaining % 60;
-          setRemainingShiftTime(
-            `${h.toString().padStart(2, "0")}:${m
-              .toString()
-              .padStart(2, "0")}:${s.toString().padStart(2, "0")}`
-          );
-          if (remaining <= 0 && countdownInterval.current) {
-            clearInterval(countdownInterval.current);
-          }
-        }, 1000);
-      }
-    };
-    restoreCountdown();
-
-    restoreCheckInState();
-  }, []);
-
-  const formatShiftHour = (shift: string) => {
-    const [hours] = shift.split(":");
-    return `${parseInt(hours)}hr`;
-  };
-
-  const getShiftDurationInSeconds = () => {
-    if (!shiftHour) return 0;
-    const [h, m, s] = shiftHour.split(":").map(Number);
-    return h * 3600 + m * 60 + s;
-  };
-
-  const getDistance = (lat1, lon1, lat2, lon2) => {
-    const toRad = (val) => (val * Math.PI) / 180;
-    const R = 6371e3;
-    const φ1 = toRad(lat1);
-    const φ2 = toRad(lat2);
-    const Δφ = toRad(lat2 - lat1);
-    const Δλ = toRad(lon2 - lon1);
-
-    const a =
-      Math.sin(Δφ / 2) ** 2 +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
-
-  const startShiftCountdown = async () => {
-    const shiftSeconds = getShiftDurationInSeconds();
-
-    const startTime = Date.now();
-    await AsyncStorage.setItem("shiftCountdownStart", startTime.toString());
-    await AsyncStorage.setItem("shiftSeconds", shiftSeconds.toString());
-
-    let remaining = shiftSeconds;
-
-    const storedRemaining = await AsyncStorage.getItem("remainingShiftSeconds");
-    if (storedRemaining) {
-      remaining = parseInt(storedRemaining);
-    }
-
-    countdownInterval.current = setInterval(() => {
-      remaining -= 1;
-      const h = Math.floor(remaining / 3600);
-      const m = Math.floor((remaining % 3600) / 60);
-      const s = remaining % 60;
-
-      setRemainingShiftTime(
-        `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s
-          .toString()
-          .padStart(2, "0")}`
-      );
-      if (remaining <= 0 && countdownInterval.current) {
-        clearInterval(countdownInterval.current);
-      }
-    }, 1000);
-  };
-
-  const stopShiftCountdown = async () => {
-    if (countdownInterval.current) {
-      clearInterval(countdownInterval.current);
-      countdownInterval.current = null;
-      setRemainingShiftTime(null);
-    }
-    await AsyncStorage.removeItem("shiftCountdownStart");
-    await AsyncStorage.removeItem("shiftSeconds");
-    await AsyncStorage.removeItem("remainingShiftSeconds");
-  };
-
-  const handleCheckIn = async () => {
-    if (!location) {
-      Alert.alert("Fetching your location...");
-      return;
-    }
-
-    const distance = getDistance(
-      location.latitude,
-      location.longitude,
-      ALLOWED_LAT,
-      ALLOWED_LON
-    );
-    if (distance > RADIUS_METERS) {
-      Alert.alert("You are outside the allowed area");
-      return;
-    }
-
-    const now = moment();
-    const formattedCheckIn = now.format("YYYY-MM-DD HH:mm:ss");
-    console.log("Check-in Time:", formattedCheckIn);
-
-    setCheckedIn(true);
-    setCheckInTime(now);
-    setCheckOutTime(null);
-    setTotalHours(null);
-
-    await AsyncStorage.setItem("checkedIn", "true");
-    await AsyncStorage.setItem("checkInTime", now.toISOString());
-
-    const formData = new FormData();
-    formData.append("token", authToken);
-    formData.append("checkin", formattedCheckIn);
-    formData.append("employee_id", employeeId); // You should dynamically get this from user state
-    formData.append("type", "CheckIn");
-    formData.append("company_id", companyId);
-
+  // Fetch stats and recent entries via GET
+  const fetchDashboardData = async () => {
+    setLoading(true);
     try {
-      const response = await axios.post(
-        BASE_URL + "employeecheckin",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            "User-Agent": "DashboardApp",
-          },
-        }
-      );
+      // 1. Fetch Pending List (inside quarry) via GET
+      const pendingRes = await axios.get(BASE_URL + "boompendinglist", {
+        params: {
+          company_id: companyId || 23,
+          limit: 10,
+          offset: 0,
+        },
+        headers: { "User-Agent": "DashboardApp" },
+      });
 
-      const data = response.data;
-      console.log("Check-in API Response:", data);
-
-      if (data?.status === "success") {
-        startShiftCountdown();
-        Alert.alert("Success", "Checked in successfully!");
-      } else {
-        Alert.alert("Error", data?.message || "Check-in failed.");
+      let pendingList = [];
+      if (pendingRes.data.status === "success" || pendingRes.data.success) {
+        pendingList = pendingRes.data.data || [];
+        setPendingCount(pendingRes.data.total_count !== undefined ? pendingRes.data.total_count : pendingList.length);
       }
-    } catch (err) {
-      console.error("Check-in API Error:", err);
-      Alert.alert("Error", "Something went wrong during check-in.");
+
+      // 2. Fetch Exited List (today's completed logs) via GET
+      const exitedRes = await axios.get(BASE_URL + "boomexitedlist", {
+        params: {
+          company_id: companyId || 23,
+          from_date: moment().format("YYYY-MM-DD"),
+          to_date: moment().format("YYYY-MM-DD"),
+          limit: 50,
+          offset: 0,
+        },
+        headers: { "User-Agent": "DashboardApp" },
+      });
+
+      if (exitedRes.data.status === "success" || exitedRes.data.success) {
+        const exitedList = exitedRes.data.data || [];
+        setExitedCount(exitedRes.data.total_count !== undefined ? exitedRes.data.total_count : exitedList.length);
+      }
+
+      // Preview recent 4 inside vehicles
+      setRecentVehicles(pendingList.slice(0, 4));
+
+    } catch (error) {
+      console.error("Error loading dashboard metrics:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCheckOut = async () => {
-    const outTime = moment();
-    const formattedCheckOut = outTime.format("YYYY-MM-DD HH:mm:ss");
-    console.log("Check-out Time:", formattedCheckOut);
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [companyId])
+  );
 
-    const duration = moment.duration(outTime.diff(checkInTime));
-    const hours = duration.asHours().toFixed(2);
-
-    setCheckedIn(false);
-    setCheckOutTime(outTime);
-    setTotalHours(hours);
-
-    await AsyncStorage.removeItem("checkedIn");
-    await AsyncStorage.removeItem("checkInTime");
-
-    dispatch(
-      addSession({
-        date: moment().format("YYYY-MM-DD"),
-        checkIn: moment(checkInTime).format("HH:mm"),
-        checkOut: moment(outTime).format("HH:mm"),
-        totalHours: hours,
-      })
-    );
-
-    const formData = new FormData();
-    formData.append("token", authToken);
-    formData.append("checkout", formattedCheckOut);
-    formData.append("employee_id", employeeId);
-    formData.append("type", "CheckOut");
-    formData.append("company_id", companyId);
-
-    try {
-      const response = await axios.post(
-        BASE_URL + "employeecheckin",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            "User-Agent": "DashboardApp",
-          },
-        }
-      );
-
-      const data = response.data;
-      console.log("Check-out API Response:", data);
-
-      if (data?.status === "success") {
-        stopShiftCountdown();
-        dispatch(setTotalWorkedHours(data.total_hours || "00:00:00"));
-
-        // ✅ Save remaining shift time to AsyncStorage (HH:MM:SS → seconds)
-        const remainingShiftTime = data.remaining_shift_time; // make sure this comes from API
-        const remaining = remainingShiftTime
-          ? remainingShiftTime.split(":").reduce((acc, val, i) => {
-              return acc + parseInt(val) * Math.pow(60, 2 - i); // h:m:s → seconds
-            }, 0)
-          : 0;
-
-        await AsyncStorage.setItem(
-          "remainingShiftSeconds",
-          remaining.toString()
-        );
-        await AsyncStorage.removeItem("shiftCountdownStart"); // optional cleanup
-        setShowPunchOutModal(true);
-        // Alert.alert(
-        //   "Success",
-        //   `Checked out. Worked: ${data.worked_hours || "--"}, Total: ${
-        //     data.total_hours || "--"
-        //   }`
-        // );
-      } else {
-        Alert.alert("Error", data?.message || "Check-out failed.");
-      }
-    } catch (err) {
-      console.error("Check-out API Error:", err);
-      Alert.alert("Error", "Something went wrong during check-out.");
-    }
-  };
-
-  const formatDuration = (duration) => {
-    const hours = Math.floor(duration.asHours());
-    const minutes = duration.minutes();
-    const seconds = duration.seconds();
-
-    return `${hours ? `${hours} hr` : ""} ${minutes ? `${minutes} min` : ""} ${
-      seconds ? `${seconds} sec` : ""
-    }`.trim();
-  };
-
- const handleLogout = async () => {
-  Alert.alert(
-    "Confirm Logout",
-    "Are you sure you want to log out?",
-    [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
+  const handleLogout = async () => {
+    Alert.alert("Confirm Logout", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
       {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
           try {
             const formData = new FormData();
-            formData.append("token", authToken);
-
-            const response = await axios.post(
-              BASE_URL + "employeelogout",
-              formData,
-              {
-                headers: {
-                  "Content-Type": "multipart/form-data",
-                  "User-Agent": "DashboardApp",
-                },
-              }
-            );
-
-            const data = response.data;
-            console.log("Logout Response:", data);
-            await AsyncStorage.removeItem("authToken");
-
-            if (data?.status === "success") {
-              dispatch(setAuthToken(""));
-              dispatch(resetAuth());
-              Alert.alert("Logged Out", "You have been logged out successfully.");
-              router.push("/showloginscreen");
-            } else {
-              Alert.alert("Error", data.message || "Logout failed.");
-              dispatch(setAuthToken(""));
-              router.push("/showloginscreen");
-            }
-          } catch (error) {
-            console.error("Logout Error:", error);
-            Alert.alert("Error", "Something went wrong. Please try again later.");
-
-            // Still clear token on error
+            formData.append("token", authToken || "");
+            await axios.post(BASE_URL + "employeelogout", formData, {
+              headers: {
+                "Content-Type": "multipart/form-data",
+                "User-Agent": "DashboardApp",
+              },
+            });
+          } catch (e) {
+            console.error("Logout API call error:", e);
+          } finally {
             await AsyncStorage.removeItem("authToken");
             dispatch(resetAuth());
             router.replace("/showloginscreen");
           }
         },
       },
-    ]
-  );
-};
+    ]);
+  };
 
-
-   const getInitial = (name: string) =>
+  const getInitial = (name: string) =>
     name ? name.charAt(0).toUpperCase() : "?";
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <AdPopup visible={showAd} onClose={() => setShowAd(false)} />
-
+    <View style={styles.safeArea}>
+      {/* Edge-to-Edge Status Bar Fill */}
+      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
+      <StatusBar style="light" backgroundColor="#0f5f3c" />
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
@@ -488,136 +145,209 @@ export default function HomeScreen() {
         <View style={styles.headerContainer}>
           <View style={styles.profileContainer}>
             <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getInitial(username)}</Text>
-        </View>
+              <Text style={styles.avatarText}>{getInitial(username || "")}</Text>
+            </View>
             <View style={styles.profileTextContainer}>
-              <Text style={styles.greeting}>{username}</Text>
+              <Text style={styles.greeting}>Hello, {username || "Operator"}</Text>
               <Text style={styles.locationText} numberOfLines={1}>
-                📍 {locationName || "Fetching location..."}
+                📍 {locationName}
               </Text>
             </View>
           </View>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <AntDesign name="logout" size={24} color="#F44336" />
+            <AntDesign name="logout" size={20} color="#F44336" />
             <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Shift Info Section */}
-        {/* <View style={styles.shiftContainer}>
-          <Text style={styles.shiftText}>
-            Shift: {formatShiftHour(shiftHour || "00:00:00")}
-          </Text>
-          {checkedIn && remainingShiftTime && (
-            <Text style={styles.countdownText}>⏳ {remainingShiftTime}</Text>
-          )}
-        </View> */}
-
-        {/* Time Display Section */}
-        <View style={styles.timeContainer}>
-          <Text style={styles.clock}>{time}</Text>
-          <Text style={styles.date}>{moment().format("dddd, MMM D YYYY")}</Text>
-        </View>
-
-        {/* Check In/Out Button */}
-        {isInAllowedLocation ? (
-          <TouchableOpacity
-            style={[
-              styles.checkButton,
-              checkedIn ? styles.checkOutButton : styles.checkInButton,
-            ]}
-            onPress={checkedIn ? handleCheckOut : handleCheckIn}
-          >
-            <Text style={styles.checkButtonText}>
-              {checkedIn ? "Check Out" : "Check In"}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.checkButton, styles.outOfLocationButton]}
-            onPress={() => Alert.alert("You are outside the allowed area")}
-          >
-            <Text style={styles.checkButtonText}>Out of Location</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Attendance Summary */}
-        <View style={styles.summaryContainer}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryIcon}>🕒</Text>
-            <Text style={styles.summaryLabel}>Check In</Text>
-            <Text style={styles.summaryValue}>
-              {checkInTime ? moment(checkInTime).format("hh:mm A") : "--"}
-            </Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryIcon}>⏰</Text>
-            <Text style={styles.summaryLabel}>Check Out</Text>
-            <Text style={styles.summaryValue}>
-              {checkOutTime ? moment(checkOutTime).format("hh:mm A") : "--"}
-            </Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryIcon}>⏳</Text>
-            <Text style={styles.summaryLabel}>Total Hrs</Text>
-            <Text style={styles.summaryValue}>
-              {totalHours
-                ? formatDuration(moment.duration(totalHours, "hours"))
-                : "--"}
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Check Out Modal */}
-      <Modal
-        visible={showPunchOutModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowPunchOutModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Check Out</Text>
-            <Text style={styles.modalTime}>
-              Time:{" "}
-              {totalHours
-                ? formatDuration(moment.duration(totalHours, "hours"))
-                : "--"}
-            </Text>
-            <Text style={styles.modalLocationLabel}>Location:</Text>
-            <Text style={styles.modalAddress}>
-              {locationName || "Fetching location..."}
-            </Text>
-            <Image
-              source={require("../../assets/images/businessman.png")}
-              style={styles.modalImage}
-              resizeMode="contain"
+        {/* Time and Date */}
+        <LinearGradient
+          colors={["#0f5f3c", "#1e6042"]}
+          style={styles.timeCard}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.timeCardContent}>
+            <View>
+              <Text style={styles.clockText}>{time}</Text>
+              <Text style={styles.dateText}>
+                {moment().format("dddd, D MMMM YYYY")}
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              name="clock-time-four-outline"
+              size={44}
+              color="rgba(255, 255, 255, 0.8)"
             />
-            <TouchableOpacity
-              onPress={() => setShowPunchOutModal(false)}
-              style={styles.okButton}
-            >
-              <Text style={styles.okText}>OK!</Text>
-            </TouchableOpacity>
           </View>
+        </LinearGradient>
+
+        {/* Gate Barrier Control Status Card */}
+        <View style={styles.statusCard}>
+          <View style={styles.pulseContainer}>
+            <View style={styles.pulseDot} />
+            <View style={styles.pulseRing} />
+          </View>
+          <View style={{ marginLeft: 12, flex: 1 }}>
+            <Text style={styles.statusTitle}>Automated Barrier System</Text>
+            <Text style={styles.statusSub}>Operational • LAN Connected</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.quickGateBtn}
+            onPress={() => router.push("/(tabs)/boom" as any)}
+          >
+            <MaterialCommunityIcons name="boom-gate-up" size={18} color="#fff" />
+            <Text style={styles.quickGateText}>Gate</Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
-    </SafeAreaView>
+
+        {/* Counts Row */}
+        <View style={styles.countsRow}>
+          <TouchableOpacity
+            style={[styles.countCard, { borderLeftColor: "#0f5f3c" }]}
+            onPress={() => router.push("/(tabs)/logs" as any)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.countCardHeader}>
+              <Text style={styles.countTitle}>Vehicles Inside</Text>
+              <View style={[styles.countBadge, { backgroundColor: "rgba(15, 95, 60, 0.1)" }]}>
+                <MaterialCommunityIcons name="car-multiple" size={18} color="#0f5f3c" />
+              </View>
+            </View>
+            <Text style={[styles.countValue, { color: "#0f5f3c" }]}>{pendingCount}</Text>
+            <Text style={styles.countSub}>Currently on-site</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.countCard, { borderLeftColor: "#28a745" }]}
+            onPress={() => router.push("/(tabs)/logs" as any)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.countCardHeader}>
+              <Text style={styles.countTitle}>Exited Today</Text>
+              <View style={[styles.countBadge, { backgroundColor: "rgba(40, 167, 69, 0.1)" }]}>
+                <MaterialCommunityIcons name="check-circle-outline" size={18} color="#28a745" />
+              </View>
+            </View>
+            <Text style={[styles.countValue, { color: "#28a745" }]}>{exitedCount}</Text>
+            <Text style={styles.countSub}>Successfully completed</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Quick Actions */}
+        <Text style={styles.sectionTitle}>Quick Operations</Text>
+        <View style={styles.actionGrid}>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push("/(tabs)/boom" as any)}
+          >
+            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(15, 95, 60, 0.1)" }]}>
+              <MaterialCommunityIcons name="boom-gate-up" size={24} color="#0f5f3c" />
+            </View>
+            <Text style={styles.actionText}>Gate Entry</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push("/(tabs)/boom" as any)}
+          >
+            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(255, 152, 0, 0.1)" }]}>
+              <MaterialCommunityIcons name="barcode-scan" size={24} color="#ff9800" />
+            </View>
+            <Text style={styles.actionText}>Scan & Exit</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push("/(tabs)/logs" as any)}
+          >
+            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(33, 150, 243, 0.1)" }]}>
+              <MaterialCommunityIcons name="file-document-outline" size={24} color="#2196f3" />
+            </View>
+            <Text style={styles.actionText}>View Logs</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push("/(tabs)/own-vehicles" as any)}
+          >
+            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(156, 39, 176, 0.1)" }]}>
+              <MaterialCommunityIcons name="car-cog" size={24} color="#9c27b0" />
+            </View>
+            <Text style={styles.actionText}>Own Vehicles</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Recent Entries Preview */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Vehicles Inside Quarry</Text>
+          <TouchableOpacity onPress={() => router.push("/(tabs)/logs" as any)}>
+            <Text style={styles.seeAllLink}>See All ({pendingCount})</Text>
+          </TouchableOpacity>
+        </View>
+
+        {recentVehicles.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="car-outline" size={40} color="#999" />
+            <Text style={styles.emptyText}>No vehicles currently inside</Text>
+          </View>
+        ) : (
+          recentVehicles.map((item, index) => {
+            const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "");
+            const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
+            const imgUrl = resolveImageUrl(rawImg);
+            return (
+              <View key={item.id || index} style={styles.recentCard}>
+                <View style={styles.recentContent}>
+                  {imgUrl ? (
+                    <Image source={{ uri: imgUrl }} style={styles.recentImg} />
+                  ) : (
+                    <View style={styles.recentIcon}>
+                      <MaterialCommunityIcons
+                        name={
+                          item.vehicle_type?.toLowerCase() === "bike"
+                            ? "motorbike"
+                            : item.vehicle_type?.toLowerCase() === "car"
+                            ? "car"
+                            : "truck"
+                        }
+                        size={22}
+                        color="#0f5f3c"
+                      />
+                    </View>
+                  )}
+                  <View style={styles.recentInfo}>
+                    <Text style={styles.recentTruckText}>{item.truck}</Text>
+                    <Text style={styles.recentTypeText}>{item.vehicle_type}</Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <View style={styles.recentTimeBadge}>
+                      <Text style={styles.recentTimeText}>
+                        {item.entry_datetime ? moment(item.entry_datetime).format("hh:mm A") : ""}
+                      </Text>
+                    </View>
+                    {duration ? (
+                      <Text style={styles.recentDurationText}>⏱️ {duration}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#f5f7fa",
   },
   scrollContainer: {
-    padding: 20,
-    paddingBottom: Platform.select({
-      ios: 40,
-      android: 20,
-    }),
+    padding: 15,
+    paddingBottom: Platform.OS === "ios" ? 110 : 130,
   },
   headerContainer: {
     flexDirection: "row",
@@ -625,197 +355,347 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FFD700", // Gold color
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#191820",
-  },
   profileContainer: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
   },
-  profileImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#d4b262",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+    elevation: 2,
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#fff",
   },
   profileTextContainer: {
-    marginLeft: 5,
     flex: 1,
   },
   greeting: {
-    fontSize: 22,
-    fontWeight: "600",
-    color: "#1B1B1D",
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
   },
   locationText: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#666",
-    marginTop: 4,
+    marginTop: 2,
   },
   logoutButton: {
     alignItems: "center",
-    marginLeft: 10,
+    padding: 5,
   },
   logoutText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
     color: "#F44336",
     marginTop: 2,
   },
-  shiftContainer: {
-    backgroundColor: "#F0F8FF",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 24,
+  timeCard: {
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+  },
+  timeCardContent: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  shiftText: {
-    fontSize: 16,
+  clockText: {
+    fontSize: 32,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  dateText: {
+    fontSize: 14,
+    color: "rgba(255, 255, 255, 0.8)",
+    marginTop: 4,
+  },
+  statusCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
+  },
+  pulseContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+    width: 20,
+    height: 20,
+  },
+  pulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#28a745",
+    zIndex: 2,
+  },
+  pulseRing: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(40, 167, 69, 0.4)",
+    zIndex: 1,
+  },
+  statusTitle: {
+    fontSize: 14,
     fontWeight: "600",
     color: "#333",
   },
-  countdownText: {
-    fontSize: 15,
-    color: "#0F3460",
-    fontWeight: "600",
+  statusSub: {
+    fontSize: 12,
+    color: "#777",
+    marginTop: 2,
   },
-  timeContainer: {
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0f5f3c",
+    marginBottom: 12,
+    marginTop: 10,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 15,
     marginBottom: 10,
   },
-  clock: {
-    fontSize: 48,
-    fontWeight: "700",
-    color: "#333",
+  seeAllLink: {
+    color: "#0f5f3c",
+    fontWeight: "600",
+    fontSize: 13,
   },
-  date: {
-    fontSize: 16,
-    color: "#666",
-    marginTop: 4,
-  },
-  checkButton: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    justifyContent: "center",
-    alignItems: "center",
-    alignSelf: "center",
-    marginVertical: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 6,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
-  },
-  checkInButton: {
-    backgroundColor: "#4CAF50",
-  },
-  checkOutButton: {
-    backgroundColor: "#F44336",
-  },
-  outOfLocationButton: {
-    backgroundColor: "#FF9800",
-  },
-  checkButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  summaryContainer: {
+  statsGrid: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 12,
-    paddingHorizontal: 16,
+    marginBottom: 20,
   },
-  summaryItem: {
-    alignItems: "center",
-    flex: 1,
+  statItem: {
+    width: (width - 45) / 2,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 15,
+    borderLeftWidth: 4,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
   },
-  summaryIcon: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 16,
+  statLabel: {
+    fontSize: 12,
     fontWeight: "600",
-    color: "#1B1B1D",
+    color: "#666",
   },
-  modalOverlay: {
+  statValue: {
+    fontSize: 28,
+    fontWeight: "bold",
+    marginVertical: 4,
+  },
+  statDesc: {
+    fontSize: 10,
+    color: "#999",
+  },
+  actionsGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  actionButton: {
+    width: (width - 50) / 3,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingVertical: 15,
+    alignItems: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
+  },
+  quickGateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0f5f3c",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  quickGateText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginLeft: 4,
+  },
+  countsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
+    gap: 10,
+  },
+  countCard: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    borderLeftWidth: 4,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
+  },
+  countCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  countTitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#666",
+  },
+  countBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
   },
-  modalContainer: {
-    backgroundColor: "#fff",
-    padding: 24,
-    width: "85%",
-    borderRadius: 20,
-    alignItems: "center",
-  },
-  modalTitle: {
-    fontSize: 24,
+  countValue: {
+    fontSize: 26,
     fontWeight: "bold",
-    color: "#0F3460",
-    marginBottom: 12,
+    marginVertical: 4,
   },
-  modalTime: {
-    fontSize: 18,
+  countSub: {
+    fontSize: 10,
+    color: "#999",
+  },
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 15,
+    gap: 10,
+  },
+  actionCard: {
+    width: (width - 40) / 4,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
+  },
+  actionIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  actionText: {
+    fontSize: 11,
     fontWeight: "600",
     color: "#333",
-    marginBottom: 12,
-  },
-  modalLocationLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#666",
-  },
-  modalAddress: {
-    fontSize: 14,
-    color: "#666",
     textAlign: "center",
-    marginTop: 4,
-    marginBottom: 16,
   },
-  modalImage: {
-    width: 160,
-    height: 160,
-    marginVertical: 12,
+  emptyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 1,
   },
-  okButton: {
-    backgroundColor: "#0F3460",
-    paddingVertical: 12,
-    paddingHorizontal: 32,
-    borderRadius: 30,
-    marginTop: 16,
+  emptyText: {
+    fontSize: 13,
+    color: "#888",
+    marginTop: 10,
   },
-  okText: {
-    color: "#fff",
-    fontSize: 16,
+  recentCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 2,
+  },
+  recentContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  recentImg: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    marginRight: 2,
+  },
+  recentIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 95, 60, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recentInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  recentTruckText: {
+    fontSize: 14,
     fontWeight: "bold",
+    color: "#333",
+  },
+  recentTypeText: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 2,
+  },
+  recentTimeBadge: {
+    backgroundColor: "#f0f2f5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  recentTimeText: {
+    fontSize: 11,
+    color: "#555",
+    fontWeight: "500",
+  },
+  recentDurationText: {
+    fontSize: 10,
+    color: "#0f5f3c",
+    fontWeight: "600",
+    marginTop: 3,
   },
 });

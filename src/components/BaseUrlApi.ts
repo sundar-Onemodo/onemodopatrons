@@ -1,1 +1,1 @@
-export const BASE_URL = "https://sat.modomines.com/api/";
+export const BASE_URL = "https://sat.modomines.com/apiv3/";

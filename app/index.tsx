@@ -1,11 +1,9 @@
 import { RootState } from "@/src/store/store";
-import { MaterialIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
   Easing,
   StyleSheet,
@@ -18,7 +16,6 @@ export default function IndexScreen() {
   const router = useRouter();
   const { authToken } = useSelector((state: RootState) => state.auth);
   const [rehydrated, setRehydrated] = useState(false);
-  const [locationName, setLocationName] = useState("Fetching location...");
 
   // Animation refs
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -30,7 +27,7 @@ export default function IndexScreen() {
       Animated.parallel([
         Animated.sequence([
           Animated.timing(scaleAnim, {
-            toValue: 1.6,
+            toValue: 1.4,
             duration: 1500,
             easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
@@ -44,7 +41,7 @@ export default function IndexScreen() {
         ]),
         Animated.sequence([
           Animated.timing(opacityAnim, {
-            toValue: 0.2,
+            toValue: 0.15,
             duration: 1500,
             easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
@@ -60,36 +57,7 @@ export default function IndexScreen() {
     ).start();
   }, []);
 
-  // Get current location once
-  useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission to access location was denied");
-        setLocationName("Permission denied");
-        return;
-      }
-
-      try {
-        const loc = await Location.getCurrentPositionAsync({});
-        const [place] = await Location.reverseGeocodeAsync(loc.coords);
-
-        if (place) {
-          const name = `${place.name || ""}, ${place.city || ""}, ${
-            place.region || ""
-          }, ${place.country || ""}`;
-          setLocationName(name);
-        } else {
-          setLocationName("Unable to fetch location");
-        }
-      } catch (err) {
-        console.error("Location error:", err);
-        setLocationName("Error fetching location");
-      }
-    })();
-  }, []);
-
-  // Simulate redux-persist rehydration
+  // Simulate redux-persist rehydration & verify session
   useEffect(() => {
     const timeout = setTimeout(() => setRehydrated(true), 1500);
     return () => clearTimeout(timeout);
@@ -102,17 +70,17 @@ export default function IndexScreen() {
     if (authToken) {
       setTimeout(() => {
         router.replace("/(tabs)");
-      }, 2000);
+      }, 1500);
     } else {
       setTimeout(() => {
         router.replace("/showloginscreen");
-      }, 2000);
+      }, 1500);
     }
   }, [rehydrated, authToken]);
 
   return (
-    <LinearGradient colors={["#ffffff", "#f9f9f9"]} style={styles.container}>
-      <View style={styles.mapMarkerContainer}>
+    <LinearGradient colors={["#0f5f3c", "#0a3d27"]} style={styles.container}>
+      <View style={styles.markerContainer}>
         {/* Pulsating animated circle */}
         <Animated.View
           style={[
@@ -124,22 +92,16 @@ export default function IndexScreen() {
           ]}
         />
 
-        {/* Location Pin */}
-        <View style={styles.pinWrapper}>
-          <MaterialIcons name="location-pin" size={60} color="#ff4d4d" />
+        {/* Shield Lock Icon */}
+        <View style={styles.iconWrapper}>
+          <MaterialCommunityIcons name="shield-lock" size={64} color="#d4b262" />
         </View>
       </View>
 
-      {/* Location Text */}
+      {/* Welcome Terminal Text */}
       <View style={styles.textContainer}>
-        <Text style={styles.subTitle}>Your Location</Text>
-        <View style={styles.row}>
-          <MaterialIcons name="location-on" size={20} color="#ff4d4d" />
-          <Text style={styles.title}>Work</Text>
-        </View>
-        <Text style={styles.address} numberOfLines={2}>
-          {locationName}
-        </Text>
+        <Text style={styles.title}>PATRONS GATE</Text>
+        <Text style={styles.subTitle}>Securing Gate Terminal Access...</Text>
       </View>
     </LinearGradient>
   );
@@ -151,48 +113,39 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  mapMarkerContainer: {
+  markerContainer: {
     width: 180,
     height: 180,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 40,
+    marginBottom: 20,
   },
   pulse: {
     position: "absolute",
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: "rgba(255,77,77,0.3)",
+    backgroundColor: "rgba(212, 178, 98, 0.2)",
   },
-  pinWrapper: {
+  iconWrapper: {
     justifyContent: "center",
     alignItems: "center",
   },
   textContainer: {
     alignItems: "center",
     paddingHorizontal: 20,
-  },
-  subTitle: {
-    fontSize: 14,
-    color: "#999",
-    letterSpacing: 1,
-    marginBottom: 6,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
+    marginTop: 10,
   },
   title: {
     fontSize: 22,
-    fontWeight: "700",
-    color: "#000",
-    marginLeft: 4,
+    fontWeight: "bold",
+    color: "#fff",
+    letterSpacing: 2,
   },
-  address: {
-    fontSize: 14,
-    color: "#555",
-    textAlign: "center",
+  subTitle: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.7)",
+    marginTop: 6,
+    letterSpacing: 0.5,
   },
 });

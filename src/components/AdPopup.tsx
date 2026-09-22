@@ -17,11 +17,11 @@ const { width, height } = Dimensions.get('window');
 const AdPopup = ({ visible, onClose } : any) => {
 
    const [timeLeft, setTimeLeft] = useState(30);
-  const timerRef = useRef(null);
+  const timerRef = useRef<any>(null);
   const adImage = require('../../assets/images/adImg.png');
 
   const [currentIndex, setCurrentIndex] = useState(0);
-  const intervalRef = useRef(null);
+  const intervalRef = useRef<any>(null);
 
   useEffect(() => {
     if (visible) {

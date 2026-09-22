@@ -36,7 +36,7 @@ const PayslipScreen = () => {
   try {
     setLoading(true);
     const formData = new FormData();
-    formData.append('token', authToken);
+    formData.append('token', authToken || '');
 
     const response = await axios.post(API_LIST, formData, {
       headers: {
@@ -52,7 +52,7 @@ const PayslipScreen = () => {
     if (response.data && (response.data.data || response.data.payslips)) {
       const payslipData = response.data.data || response.data.payslips || [];
       
-      const validPayslips = payslipData.filter(item => {
+      const validPayslips = payslipData.filter((item: any) => {
         // Check for either uuid or id, and month_payslip
         return (item.uuid || item.id) && item.month_payslip;
       });
@@ -65,7 +65,7 @@ const PayslipScreen = () => {
     } else {
       throw new Error('Unexpected response structure');
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Payslip fetch error:', error);
     
     let errorMessage = 'Failed to load payslip list';
@@ -83,11 +83,11 @@ const PayslipScreen = () => {
   }
 };
 
-  const fetchPayslipFile = async (uuid) => {
+  const fetchPayslipFile = async (uuid: any) => {
   try {
     setLoading(true);
     const formData = new FormData();
-    formData.append('token', authToken);
+    formData.append('token', authToken || '');
     formData.append('uuid', uuid);
 
     const response = await axios.post(API_VIEW, formData, {
@@ -100,10 +100,10 @@ const PayslipScreen = () => {
 
     // Convert ArrayBuffer to Base64 without using Buffer
     const base64String = arrayBufferToBase64(response.data);
-    const filePath = FileSystem.documentDirectory + `payslip_${uuid}.pdf`;
+    const filePath = (FileSystem as any).documentDirectory + `payslip_${uuid}.pdf`;
 
-    await FileSystem.writeAsStringAsync(filePath, base64String, {
-      encoding: FileSystem.EncodingType.Base64,
+    await (FileSystem as any).writeAsStringAsync(filePath, base64String, {
+      encoding: (FileSystem as any).EncodingType.Base64,
     });
 
     setFileUri(filePath);
@@ -117,7 +117,7 @@ const PayslipScreen = () => {
 };
 
 // Helper function to convert ArrayBuffer to Base64
-const arrayBufferToBase64 = (buffer) => {
+const arrayBufferToBase64 = (buffer: any) => {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
@@ -149,7 +149,7 @@ const arrayBufferToBase64 = (buffer) => {
     }
   };
 
-  const renderItem = ({ item }) => (
+  const renderItem = ({ item }: { item: any }) => (
     <View style={styles.row}>
       <Text style={styles.cell}>{item.month_payslip}</Text>
       <Text style={styles.cell}>{item.generated_at?.split(' ')[0]}</Text>

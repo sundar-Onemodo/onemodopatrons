@@ -1,12 +1,13 @@
+import { fetchAndSaveBoomSettings, triggerRemoteDoorOpen } from "@/src/utils/doorController";
 import { AntDesign, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import axios from "axios";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
+import moment from "moment";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -18,6 +19,8 @@ import {
   View,
 } from "react-native";
 import { BASE_URL } from "./components/BaseUrlApi";
+import { GateStatusModal, GateStatusModalProps } from "./components/GateStatusModal";
+import { formatVehiclePlate, normalizeVehicleInput } from "./utils/vehicleFormatter";
 
 export default function VehicleInOut() {
   const [vehicleType, setVehicleType] = useState("Car");
@@ -30,23 +33,28 @@ export default function VehicleInOut() {
   const [loading, setLoading] = useState(false);
   const inputfocus = React.useRef<TextInput>(null);
 
-  inputfocus.current?.focus();
+  // Premium Status / Feedback Modal
+  const [statusModal, setStatusModal] = useState<GateStatusModalProps>({
+    visible: false,
+    type: "entry_success",
+    title: "",
+    onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+  });
 
   const companyId = "23"; // change dynamically if needed
 
-  // ===== Fetch vehicle list =====
+  // ===== Fetch vehicle pending list via GET =====
   const fetchVehicleList = async () => {
     try {
-      const formData = new FormData();
-      formData.append("company_id", companyId);
-
-      const res = await axios.post(
-        BASE_URL + "boomentryexitlist",
-        formData,
-        { headers: { "User-Agent": "DashboardApp" } }
+      const res = await axios.get(
+        BASE_URL + "boompendinglist",
+        {
+          params: { company_id: companyId, limit: 50, offset: 0 },
+          headers: { "User-Agent": "DashboardApp" }
+        }
       );
-      if (res.data.success) {
-        setVehicleList(res.data.data);
+      if (res.data.status === "success" || res.data.success) {
+        setVehicleList(res.data.data || []);
       }
     } catch (error) {
       console.error("Error fetching list:", error);
@@ -55,13 +63,14 @@ export default function VehicleInOut() {
 
   useEffect(() => {
     fetchVehicleList();
+    fetchAndSaveBoomSettings(companyId);
   }, []);
 
   // ===== Compress Image =====
   const compressImage = async (uri: string) => {
     const manipResult = await ImageManipulator.manipulateAsync(
       uri,
-      [{ resize: { width: 800 } }], // shrink large images
+      [{ resize: { width: 800 } }],
       { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
     );
     return manipResult;
@@ -71,13 +80,19 @@ export default function VehicleInOut() {
   const pickImage = async (forExit = false) => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert("Permission Required", "Camera access is required!");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Permission Required",
+        subtitle: "Camera access is required to capture vehicle image.",
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
       return;
     }
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0,
+      quality: 0.7,
     });
 
     if (!result.canceled) {
@@ -92,31 +107,36 @@ export default function VehicleInOut() {
 
   // ===== Submit Entry =====
   const handleSubmit = async () => {
-    if (!vehicleNumber || !vehicleType) {
-      Alert.alert("Validation", "Please select type and enter vehicle number");
+    if (!vehicleNumber.trim() || !vehicleType) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Validation Error",
+        subtitle: "Please select vehicle type and enter a valid registration number (e.g. TN 59 AK 0001).",
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
       return;
     }
 
-    if (!vehicleImage) {
-      Alert.alert("Validation", "Please capture a vehicle image");
-      return;
-    }
+    const formattedTruck = formatVehiclePlate(vehicleNumber);
+    setVehicleNumber(formattedTruck);
 
     try {
       setLoading(true);
-      const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+      const now = moment().format("YYYY-MM-DD HH:mm:ss");
       const formData: any = new FormData();
       formData.append("company_id", companyId);
-      formData.append("truck", vehicleNumber);
+      formData.append("truck", formattedTruck);
       formData.append("vehicle_type", vehicleType);
       formData.append("entry_datetime", now);
-      formData.append("created", now);
 
-      formData.append("entry_image", {
-        uri: vehicleImage.uri,
-        type: "image/jpeg",
-        name: "vehicle.jpg",
-      } as any);
+      if (vehicleImage?.uri) {
+        formData.append("entry_image", {
+          uri: vehicleImage.uri,
+          type: "image/jpeg",
+          name: "vehicle.jpg",
+        } as any);
+      }
 
       const res = await axios.post(
         BASE_URL + "boomentry",
@@ -130,18 +150,64 @@ export default function VehicleInOut() {
         }
       );
 
-      if (res.data.status === "success") {
-        Alert.alert("✅ Success", "Entry saved successfully!");
+      if (res.data.status === "success" || res.data.success) {
+        const doorResult = await triggerRemoteDoorOpen({
+          truck: formattedTruck,
+          action: "Register Entry",
+          type: "entry",
+          companyId: companyId || 23,
+        });
+
+        setStatusModal({
+          visible: true,
+          type: "entry_success",
+          title: "Gate Entry Recorded",
+          subtitle: res.data.message || "Vehicle registration completed and recorded inside quarry.",
+          truck: formattedTruck,
+          vehicleType: vehicleType,
+          timeText: moment(now).format("DD MMM, hh:mm A"),
+          barrierSuccess: doorResult.success,
+          barrierMessage: doorResult.success
+            ? "Boom barrier OPEN command triggered successfully ✅"
+            : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+          imageUri: vehicleImage?.uri,
+          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+        });
+
         setVehicleNumber("");
-        setVehicleType("");
+        setVehicleType("Car");
         setVehicleImage(null);
         fetchVehicleList();
+      } else if (res.data.status === "error") {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Entry Failed",
+          subtitle: res.data.message || "Failed to record entry.",
+          truck: formattedTruck,
+          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+        });
       } else {
-        Alert.alert("❌ Error", res.data.message || "Failed to save entry");
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Entry Error",
+          subtitle: res.data.message || "Failed to log entry.",
+          truck: formattedTruck,
+          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+        });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving entry:", error);
-      Alert.alert("Error", "Something went wrong");
+      const msg = error?.response?.data?.message || "Something went wrong. Please try again.";
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Submission Error",
+        subtitle: msg,
+        truck: formattedTruck,
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
     } finally {
       setLoading(false);
     }
@@ -150,25 +216,23 @@ export default function VehicleInOut() {
   // ===== Exit Vehicle =====
   const handleExit = async () => {
     if (!selectedVehicle) return;
-    if (!exitImage) {
-      Alert.alert("Validation", "Please capture an exit image first!");
-      return;
-    }
 
     try {
       setLoading(true);
-      const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+      const now = moment().format("YYYY-MM-DD HH:mm:ss");
       const formData: any = new FormData();
-      formData.append("company_id", selectedVehicle.company_id);
-      formData.append("truck", selectedVehicle.truck);
-      formData.append("vehicle_type", selectedVehicle.vehicle_type);
-      formData.append("exit_datetime", now);
+      const barcodeVal = selectedVehicle.exit_barcode || selectedVehicle.barcode;
+      if (barcodeVal) {
+        formData.append("barcode", String(barcodeVal).trim());
+      }
 
-      formData.append("exit_image", {
-        uri: exitImage.uri,
-        type: "image/jpeg",
-        name: "exit.jpg",
-      } as any);
+      if (exitImage?.uri) {
+        formData.append("exit_image", {
+          uri: exitImage.uri,
+          type: "image/jpeg",
+          name: "exit.jpg",
+        } as any);
+      }
 
       const res = await axios.post(
         BASE_URL + "boomexit",
@@ -183,17 +247,58 @@ export default function VehicleInOut() {
       );
 
       if (res.data.status === "success" || res.data.success) {
-        Alert.alert("✅ Success", res.data.message || "Vehicle exited successfully!");
+        const doorResult = await triggerRemoteDoorOpen({
+          truck: selectedVehicle.truck,
+          action: "Vehicle Exit",
+          type: "exit",
+          companyId: selectedVehicle.company_id || companyId || 23,
+        });
+
+        const truckName = selectedVehicle.truck;
+        const vType = selectedVehicle.vehicle_type;
+        const dur = selectedVehicle.duration_formatted || (selectedVehicle.duration_minutes ? `${selectedVehicle.duration_minutes}m` : undefined);
+        const imgUri = exitImage?.uri;
+
         setModalVisible(false);
         setSelectedVehicle(null);
         setExitImage(null);
         fetchVehicleList();
+
+        setStatusModal({
+          visible: true,
+          type: "exit_success",
+          title: "Vehicle Exit Completed",
+          subtitle: res.data.message || "Vehicle marked as exited and gate open command triggered.",
+          truck: truckName,
+          vehicleType: vType,
+          duration: dur,
+          imageUri: imgUri,
+          barrierSuccess: doorResult.success,
+          barrierMessage: doorResult.success
+            ? "Boom barrier OPEN command triggered successfully ✅"
+            : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+        });
       } else {
-        Alert.alert("❌ Error", res.data.message || "Failed to mark exit");
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Exit Failed",
+          subtitle: res.data.message || "Failed to mark exit.",
+          truck: selectedVehicle?.truck,
+          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+        });
       }
     } catch (error: any) {
       console.error("❌ Exit error:", error?.response?.data || error.message);
-      Alert.alert("Error", "Something went wrong while marking exit");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Exit Network Error",
+        subtitle: error?.response?.data?.message || "Something went wrong while marking exit.",
+        truck: selectedVehicle?.truck,
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
     } finally {
       setLoading(false);
     }
@@ -201,66 +306,75 @@ export default function VehicleInOut() {
 
   // ===== Vehicle Number Validation =====
   const handleVehicleInput = (text: string) => {
-    let formatted = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (formatted.length <= 10) {
-      setVehicleNumber(formatted);
+    const cleaned = normalizeVehicleInput(text);
+    setVehicleNumber(cleaned);
+  };
+
+  const handleBlur = () => {
+    if (vehicleNumber.trim()) {
+      setVehicleNumber(formatVehiclePlate(vehicleNumber));
     }
   };
 
   // ===== Vehicle List Item =====
-const renderItem = ({ item, index }: any) => {
-  const isExited = item.exit_datetime !== null;
+  const renderItem = ({ item, index }: any) => {
+    const isExited = item.status === 1 || (item.exit_datetime !== null && item.exit_datetime !== undefined);
+    const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "--");
 
-  return (
-    <TouchableOpacity
-      style={[
-        styles.listCard,
-        { borderLeftColor: isExited ? "#28a745" : "#dc3545" },
-      ]}
-      onPress={() => {
-        if (!isExited) {
-          setSelectedVehicle(item);
-          pickImage(true);
-          setModalVisible(true);
-          
-        }
-      }}
-    >
-      <View style={styles.rowContent}>
-        <Text style={styles.index}>{index + 1}</Text>
+    return (
+      <TouchableOpacity
+        style={[
+          styles.listCard,
+          { borderLeftColor: isExited ? "#28a745" : "#dc3545" },
+        ]}
+        onPress={() => {
+          if (!isExited) {
+            setSelectedVehicle(item);
+            setModalVisible(true);
+          }
+        }}
+      >
+        <View style={styles.rowContent}>
+          <Text style={styles.index}>{index + 1}</Text>
 
-        <View style={styles.infoBlock}>
-          <Text style={styles.vehicleType}>{item.vehicle_type}</Text>
-          <Text style={styles.truck}>{item.truck}</Text>
-        </View>
+          {item.entry_image_url ? (
+            <Image source={{ uri: item.entry_image_url }} style={styles.listThumb} />
+          ) : null}
 
-        <View
-          style={[
-            styles.badge,
-            { backgroundColor: isExited ? "#d4edda" : "#f8d7da" },
-          ]}
-        >
-          <Ionicons
-            name={isExited ? "checkmark-circle" : "time"}
-            size={18}
-            color={isExited ? "#28a745" : "#dc3545"}
-          />
-          <Text
+          <View style={styles.infoBlock}>
+            <Text style={styles.vehicleType}>{item.vehicle_type}</Text>
+            <Text style={styles.truck}>{item.truck}</Text>
+            <Text style={styles.durationText}>⏱️ {duration}</Text>
+          </View>
+
+          <View
             style={[
-              styles.badgeText,
-              { color: isExited ? "#28a745" : "#dc3545" },
+              styles.badge,
+              { backgroundColor: isExited ? "#d4edda" : "#f8d7da" },
             ]}
           >
-            {isExited ? "Exited" : "Pending"}
-          </Text>
+            <Ionicons
+              name={isExited ? "checkmark-circle" : "time"}
+              size={18}
+              color={isExited ? "#28a745" : "#dc3545"}
+            />
+            <Text
+              style={[
+                styles.badgeText,
+                { color: isExited ? "#28a745" : "#dc3545" },
+              ]}
+            >
+              {item.status_label || (isExited ? "Exited" : "Inside")}
+            </Text>
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
-};
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <ScrollView style={styles.container}>
-      <AntDesign name="arrowleft" size={24} color="black" style={{marginTop:20, paddingLeft:10}} onPress={()=>router.push('/profile')}/>
+      <AntDesign name={"arrowleft" as any} size={24} color="black" style={{ marginTop: 20, paddingLeft: 10 }} onPress={() => router.push('/profile' as any)} />
       <Text style={styles.heading}>🚧 Vehicle IN / OUT 🚧</Text>
 
       {/* Vehicle Type Toggle with Icons */}
@@ -298,20 +412,21 @@ const renderItem = ({ item, index }: any) => {
       </View>
 
       {/* Vehicle Number */}
-      <Text style={styles.subText}>Vehicle Number:</Text>
+      <Text style={styles.subText}>Vehicle Registration Number:</Text>
       <TextInput
         style={styles.input}
-        placeholder="Enter Vehicle Number"
+        placeholder="e.g. TN 59 AK 0001"
         value={vehicleNumber}
         onChangeText={handleVehicleInput}
+        onBlur={handleBlur}
         autoCapitalize="characters"
-        maxLength={10}
+        maxLength={16}
         ref={inputfocus}
       />
 
       {/* Capture Entry Image */}
       <Text style={styles.subText}>Capture Vehicle Image:</Text>
-      <TouchableOpacity style={styles.captureButton} onPress={() => pickImage()}>
+      <TouchableOpacity style={styles.captureButton} onPress={() => pickImage(false)}>
         <Text style={styles.buttonText}>📷 Capture Image</Text>
       </TouchableOpacity>
       {vehicleImage && (
@@ -331,23 +446,24 @@ const renderItem = ({ item, index }: any) => {
         {loading ? (
           <ActivityIndicator size="small" color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Submit</Text>
+          <Text style={styles.buttonText}>Register Entry</Text>
         )}
       </TouchableOpacity>
 
       {/* Vehicle List */}
-    {vehicleList.length > 0 && (
-  <View style={{ marginTop: 20 }}>
-    <Text style={styles.sectionTitle}>Vehicle Entries</Text>
-    <FlatList
-      data={vehicleList}
-      keyExtractor={(item) => item.id.toString()}
-      renderItem={renderItem}
-      ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-      contentContainerStyle={{ paddingBottom: 20 }}
-    />
-  </View>
-)}
+      {vehicleList.length > 0 && (
+        <View style={{ marginTop: 20 }}>
+          <Text style={styles.sectionTitle}>Vehicles Inside Quarry ({vehicleList.length})</Text>
+          <FlatList
+            data={vehicleList}
+            keyExtractor={(item) => item.id?.toString()}
+            renderItem={renderItem}
+            scrollEnabled={false}
+            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+            contentContainerStyle={{ paddingBottom: 40 }}
+          />
+        </View>
+      )}
 
       {/* Exit Confirmation Modal */}
       <Modal
@@ -358,8 +474,8 @@ const renderItem = ({ item, index }: any) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={{ fontSize: 16, marginBottom: 15 }}>
-              Exit Vehicle: {selectedVehicle?.truck} ?
+            <Text style={{ fontSize: 16, fontWeight: "bold", marginBottom: 15, textAlign: "center" }}>
+              Exit Vehicle: {selectedVehicle?.truck}
             </Text>
 
             <TouchableOpacity
@@ -368,14 +484,14 @@ const renderItem = ({ item, index }: any) => {
               disabled={loading}
             >
               <Text style={styles.buttonText}>
-                {exitImage ? "Retake Exit Image" : "📷 Capture Exit Image"}
+                {exitImage ? "Retake Exit Image" : "📷 Optional Exit Image"}
               </Text>
             </TouchableOpacity>
 
             {exitImage && (
               <Image
                 source={{ uri: exitImage.uri }}
-                style={{ width: 120, height: 120, marginBottom: 15, borderRadius: 8 }}
+                style={{ width: 120, height: 120, marginBottom: 15, borderRadius: 8, alignSelf: "center" }}
               />
             )}
 
@@ -384,25 +500,25 @@ const renderItem = ({ item, index }: any) => {
                 style={[
                   styles.button,
                   {
-                    backgroundColor: exitImage ? "green" : "gray",
+                    backgroundColor: "#28a745",
                     flex: 1,
                     marginRight: 5,
                   },
                 ]}
                 onPress={handleExit}
-                disabled={!exitImage || loading}
+                disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.buttonText}>Exit</Text>
+                  <Text style={styles.buttonText}>Confirm Exit</Text>
                 )}
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
                   styles.button,
-                  { backgroundColor: "red", flex: 1, marginLeft: 5 },
+                  { backgroundColor: "#dc3545", flex: 1, marginLeft: 5 },
                 ]}
                 onPress={() => {
                   setModalVisible(false);
@@ -416,6 +532,9 @@ const renderItem = ({ item, index }: any) => {
           </View>
         </View>
       </Modal>
+
+      {/* PREMIUM GATE STATUS & FEEDBACK MODAL */}
+      <GateStatusModal {...statusModal} />
     </ScrollView>
   );
 }
@@ -428,33 +547,36 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 20,
     marginTop: 10,
+    color: "#0f5f3c",
   },
-  subText: { marginVertical: 8, fontSize: 16, fontWeight: "500", marginLeft: 5 },
+  subText: { marginVertical: 8, fontSize: 14, fontWeight: "600", color: "#444" },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     marginBottom: 15,
     backgroundColor: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
   },
   button: {
-    backgroundColor: "#007AFF",
-    padding: 12,
+    backgroundColor: "#0f5f3c",
+    padding: 14,
     borderRadius: 8,
     alignItems: "center",
     marginTop: 10,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  buttonText: { color: "#fff", fontSize: 15, fontWeight: "bold" },
   captureButton: {
-    backgroundColor: "#FF9500",
+    backgroundColor: "#d4b262",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
     marginTop: 5,
   },
-sectionTitle: {
-    fontSize: 22,
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: "700",
     marginBottom: 15,
     color: "#222",
@@ -463,7 +585,7 @@ sectionTitle: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    padding: 15,
+    padding: 12,
     borderRadius: 12,
     borderLeftWidth: 5,
     shadowColor: "#000",
@@ -481,8 +603,14 @@ sectionTitle: {
     fontSize: 14,
     fontWeight: "600",
     color: "#555",
-    width: 30,
+    width: 24,
     textAlign: "center",
+  },
+  listThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+    marginLeft: 6,
   },
   infoBlock: {
     flex: 1,
@@ -495,18 +623,24 @@ sectionTitle: {
   },
   truck: {
     fontSize: 13,
-    color: "#777",
+    fontWeight: "bold",
+    color: "#0f5f3c",
+  },
+  durationText: {
+    fontSize: 10,
+    color: "#888",
+    marginTop: 2,
   },
   badge: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 4,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     borderRadius: 20,
   },
   badgeText: {
-    marginLeft: 5,
-    fontSize: 13,
+    marginLeft: 4,
+    fontSize: 11,
     fontWeight: "600",
   },
   modalOverlay: {
@@ -516,9 +650,9 @@ sectionTitle: {
     alignItems: "center",
   },
   modalBox: {
-    width: "80%",
+    width: "85%",
     backgroundColor: "#fff",
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 20,
   },
   typeToggle: {
@@ -532,10 +666,10 @@ sectionTitle: {
     padding: 10,
     borderRadius: 8,
     backgroundColor: "#eee",
-    marginHorizontal: 5,
+    marginHorizontal: 4,
   },
   typeButtonActive: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#0f5f3c",
   },
   typeText: { marginTop: 5, fontSize: 12, fontWeight: "600", color: "#333" },
 });

@@ -1,291 +1,214 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { BASE_URL } from "@/src/components/BaseUrlApi";
+import { RootState } from "@/src/store/store";
+import { fetchAndSaveBoomSettings } from "@/src/utils/doorController";
+import { resolveImageUrl } from "@/src/utils/imageUtils";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import axios from "axios";
+import { router } from "expo-router";
+import moment from "moment";
+import { useEffect, useState } from "react";
 import {
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
-    ImageBackground,
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
-} from 'react-native';
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
 
-const { width, height } = Dimensions.get('window');
-
-// Sample images (replace with your actual image sources)
-const productImages = {
-    1: require('../assets/images/msand.png'),
-    2: require('../assets/images/P-Sand.jpeg'),
-    3: require('../assets/images/msand.png'),
-    4: require('../assets/images/cement.jpg'),
-    5: require('../assets/images/msand.png'),
-    6: require('../assets/images/P-Sand.jpeg'),
-    7: require('../assets/images/cement.jpg'),
-    8: require('../assets/images/gravels.jpg'),
-    9: require('../assets/images/cement.jpg'),
-};
+const { width } = Dimensions.get("window");
 
 const Dashboard = () => {
-  const [searchText, setSearchText] = useState('');
-  const [filteredProducts, setFilteredProducts] = useState([]);
-  const [isSearchVisible, setIsSearchVisible] = useState(true);
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const lastScrollY = useRef(0);
-  const scrollViewRef = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState({
+    inside: 0,
+    exitedToday: 0,
+    totalToday: 0,
+  });
+  const [recentEntries, setRecentEntries] = useState<any[]>([]);
 
-  // Sample data with image references
-  const topSalesData = [
-    { id: 1, name: 'M Sand', price: 1200, company: 'BuildCorp', unit: 'per ton', sales: 150, image: productImages[1] },
-    { id: 2, name: 'P Sand', price: 1100, company: 'SandTech', unit: 'per ton', sales: 120, image: productImages[2] },
-    { id: 3, name: 'Sakkai', price: 800, company: 'StoneWorks', unit: 'per ton', sales: 95, image: productImages[3] },
-    { id: 4, name: 'Cement', price: 350, company: 'CementPro', unit: 'per bag', sales: 200, image: productImages[4] },
-  ];
+  const { companyId, authToken } = useSelector((state: RootState) => state.auth);
 
-  const lowPriceProducts = [
-    { id: 5, name: 'M Sand', price: 1000, company: 'EcoSand', unit: 'per ton', discount: 15, image: productImages[5] },
-    { id: 6, name: 'P Sand', price: 950, company: 'QuickSand', unit: 'per ton', discount: 20, image: productImages[6] },
-    { id: 7, name: 'Sakkai', price: 650, company: 'RockBase', unit: 'per ton', discount: 18, image: productImages[7] },
-    { id: 8, name: 'Gravel', price: 450, company: 'GravelMax', unit: 'per ton', discount: 25, image: productImages[8] },
-    { id: 9, name: 'Cement', price: 280, company: 'ValueCement', unit: 'per bag', discount: 30, image: productImages[9] },
-  ];
+  const fetchMetrics = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch Inside Quarry via GET
+      const pendingRes = await axios.get(BASE_URL + "boompendinglist", {
+        params: {
+          company_id: companyId || 23,
+          limit: 50,
+          offset: 0,
+        },
+        headers: {
+          "User-Agent": "DashboardApp",
+        },
+      });
 
-  const allProducts = [...topSalesData, ...lowPriceProducts];
+      let pendingCount = 0;
+      let pendingList = [];
+      if (pendingRes.data.status === "success" || pendingRes.data.success) {
+        pendingList = pendingRes.data.data || [];
+        pendingCount = pendingRes.data.total_count !== undefined ? pendingRes.data.total_count : pendingList.length;
+      }
+
+      // 2. Fetch Exited Today via GET
+      const exitedRes = await axios.get(BASE_URL + "boomexitedlist", {
+        params: {
+          company_id: companyId || 23,
+          from_date: moment().format("YYYY-MM-DD"),
+          to_date: moment().format("YYYY-MM-DD"),
+          limit: 50,
+          offset: 0,
+        },
+        headers: {
+          "User-Agent": "DashboardApp",
+        },
+      });
+
+      let exitedCount = 0;
+      if (exitedRes.data.status === "success" || exitedRes.data.success) {
+        const exitedList = exitedRes.data.data || [];
+        exitedCount = exitedRes.data.total_count !== undefined ? exitedRes.data.total_count : exitedList.length;
+      }
+
+      setStats({
+        inside: pendingCount,
+        exitedToday: exitedCount,
+        totalToday: pendingCount + exitedCount,
+      });
+
+      setRecentEntries(pendingList.slice(0, 5));
+
+    } catch (e) {
+      console.error("Dashboard metrics load failed:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const filtered = allProducts.filter(product =>
-      product.name.toLowerCase().includes(searchText.toLowerCase()) ||
-      product.company.toLowerCase().includes(searchText.toLowerCase())
-    );
-    setFilteredProducts(filtered);
-  }, [searchText]);
-
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    {
-      useNativeDriver: false,
-      listener: (event) => {
-        const currentScrollY = event.nativeEvent.contentOffset.y;
-        const scrollingDown = currentScrollY > lastScrollY.current && currentScrollY > 50;
-        const scrollingUp = currentScrollY < lastScrollY.current;
-        
-        if (scrollingDown && isSearchVisible) {
-          setIsSearchVisible(false);
-        } else if (scrollingUp && !isSearchVisible) {
-          setIsSearchVisible(true);
-        }
-        
-        lastScrollY.current = currentScrollY;
-      }
+    fetchMetrics();
+    if (companyId) {
+      fetchAndSaveBoomSettings(companyId, authToken || undefined);
     }
-  );
+  }, [companyId, authToken]);
 
-  const searchTranslateY = scrollY.interpolate({
-    inputRange: [0, 50],
-    outputRange: [0, -60],
-    extrapolate: 'clamp',
-  });
-
-  const TopSalesCard = ({ item, index }) => {
-    const cardAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      Animated.spring(cardAnim, {
-        toValue: 1,
-        delay: index * 100,
-        useNativeDriver: true,
-        friction: 6,
-      }).start();
-    }, []);
-
-    const scale = cardAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.9, 1],
-    });
-
-    const opacity = cardAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.5, 1],
-    });
+  const renderActivityItem = ({ item, index }: { item: any; index: number }) => {
+    const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "--");
+    const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
+    const imgUrl = resolveImageUrl(rawImg);
 
     return (
-      <Animated.View style={[styles.topSalesCard, { 
-        transform: [{ scale }],
-        opacity
-      }]}>
-        <ImageBackground source={item.image} style={styles.cardImage} imageStyle={styles.cardImageStyle}>
-          <View style={styles.cardOverlay}>
-            <View style={styles.cardHeader}>
-              <View style={styles.salesBadge}>
-                <Text style={styles.salesText}>{item.sales} sold</Text>
-              </View>
-            </View>
-            <View style={styles.cardContent}>
-              <Text style={styles.cardTitle}>{item.name}</Text>
-              <Text style={styles.companyName}>{item.company}</Text>
-              <View style={styles.priceContainer}>
-                <Text style={styles.price}>₹{item.price}</Text>
-                <Text style={styles.unit}>{item.unit}</Text>
-              </View>
-            </View>
-            <TouchableOpacity style={styles.buyButton}>
-              <Text style={styles.buyButtonText}>Buy Now</Text>
-            </TouchableOpacity>
+      <View style={styles.activityCard}>
+        <View style={styles.activityRow}>
+          <View style={styles.activityIndexContainer}>
+            <Text style={styles.activityIndex}>{index + 1}</Text>
           </View>
-        </ImageBackground>
-      </Animated.View>
-    );
-  };
-
-  const LowPriceCard = ({ item, index }) => {
-    const cardAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      Animated.spring(cardAnim, {
-        toValue: 1,
-        delay: index * 80,
-        useNativeDriver: true,
-        friction: 6,
-      }).start();
-    }, []);
-
-    const translateY = cardAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [30, 0],
-    });
-
-    const opacity = cardAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.5, 1],
-    });
-
-    return (
-      <Animated.View style={[styles.lowPriceCard, { 
-        transform: [{ translateY }],
-        opacity
-      }]}>
-        <ImageBackground source={item.image} style={styles.lowPriceImage} imageStyle={styles.lowPriceImageStyle}>
-          <View style={styles.lowPriceOverlay}>
-            <View style={styles.discountBadgeContainer}>
-              <View style={styles.discountBadge}>
-                <Text style={styles.discountText}>{item.discount}% OFF</Text>
-              </View>
-            </View>
-            <View style={styles.lowPriceContent}>
-              <Text style={styles.productName}>{item.name}</Text>
-              <Text style={styles.companyNameLow}>{item.company}</Text>
-              <View style={styles.priceRow}>
-                <Text style={styles.currentPrice}>₹{item.price}</Text>
-                <Text style={styles.originalPrice}>₹{Math.round(item.price * (1 + item.discount / 100))}</Text>
-              </View>
-              <Text style={styles.unitText}>{item.unit}</Text>
-            </View>
+          {imgUrl ? (
+            <Image source={{ uri: imgUrl }} style={styles.activityThumb} />
+          ) : null}
+          <View style={styles.activityDetails}>
+            <Text style={styles.activityTitle}>{item.truck}</Text>
+            <Text style={styles.activitySub}>{item.vehicle_type}</Text>
           </View>
-        </ImageBackground>
-      </Animated.View>
-    );
-  };
-
-  const SectionLabel = ({ title, icon }) => {
-    const iconColor = title === 'Top Sales' ? '#FF6B6B' : '#4ECDC4';
-    
-    return (
-      <View style={styles.sectionLabelContainer}>
-        <View style={[styles.sectionIcon, { backgroundColor: iconColor }]}>
-          <Text style={styles.sectionIconText}>{icon}</Text>
+          <View style={{ alignItems: "flex-end" }}>
+            <View style={styles.activityBadge}>
+              <Text style={styles.activityBadgeText}>
+                In: {item.entry_datetime ? moment(item.entry_datetime).format("hh:mm A") : "--"}
+              </Text>
+            </View>
+            <Text style={styles.activityDurationText}>⏱️ {duration}</Text>
+          </View>
         </View>
-        <Text style={styles.sectionLabelText}>{title}</Text>
       </View>
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      
-      {/* Search Bar - Animated */}
-      {isSearchVisible && (
-        <Animated.View style={[
-          styles.searchContainer,
-          {
-            transform: [{ translateY: searchTranslateY }],
-          }
-        ]}>
-          <View style={styles.searchBar}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search products or companies..."
-              placeholderTextColor="#999"
-              value={searchText}
-              onChangeText={setSearchText}
-            />
-            {searchText.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchText('')}>
-                <Text style={styles.clearIcon}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </Animated.View>
-      )}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#0f5f3c" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Operations Control Panel</Text>
+        <TouchableOpacity style={styles.refreshBtn} onPress={fetchMetrics} disabled={loading}>
+          <Ionicons name="refresh" size={22} color="#0f5f3c" />
+        </TouchableOpacity>
+      </View>
 
-      <Animated.ScrollView 
-        ref={scrollViewRef}
-        style={styles.content} 
-        showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Top Sales Section */}
-        <View style={styles.section}>
-          <SectionLabel title="Top Sales" icon="🔥" />
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Main Banner */}
+        <View style={styles.banner}>
+          <MaterialCommunityIcons name="shield-lock-outline" size={48} color="#d4b262" />
+          <Text style={styles.bannerText}>Quarry Gate Secure Terminal</Text>
+          <Text style={styles.bannerSub}>Monitor real-time vehicle flow, boom gate operations, and authorization logs.</Text>
+        </View>
+
+        {/* Stats Grid */}
+        <Text style={styles.sectionTitle}>Gate Metrics (Today)</Text>
+        <View style={styles.metricsGrid}>
+          <View style={[styles.metricCard, { borderLeftColor: "#28a745" }]}>
+            <Text style={styles.metricVal}>{stats.totalToday}</Text>
+            <Text style={styles.metricLabel}>Total Trips Logged</Text>
+          </View>
+          <View style={[styles.metricCard, { borderLeftColor: "#dc3545" }]}>
+            <Text style={styles.metricVal}>{stats.inside}</Text>
+            <Text style={styles.metricLabel}>Active inside Quarry</Text>
+          </View>
+          <View style={[styles.metricCard, { borderLeftColor: "#007bff" }]}>
+            <Text style={styles.metricVal}>{stats.exitedToday}</Text>
+            <Text style={styles.metricLabel}>Exited Quarry</Text>
+          </View>
+        </View>
+
+        {/* Live Terminal Flow */}
+        <View style={styles.listHeaderRow}>
+          <Text style={styles.sectionTitle}>Inside Quarry (Live Preview)</Text>
+          {loading && <ActivityIndicator size="small" color="#0f5f3c" />}
+        </View>
+
+        {recentEntries.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="shield-checkmark-outline" size={44} color="#aaa" />
+            <Text style={styles.emptyText}>No vehicles currently registered inside quarry.</Text>
+          </View>
+        ) : (
           <FlatList
-            data={topSalesData}
-            renderItem={({ item, index }) => <TopSalesCard item={item} index={index} />}
-            keyExtractor={item => item.id.toString()}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
+            data={recentEntries}
+            renderItem={renderActivityItem}
+            keyExtractor={(item, index) => item.id?.toString() || index.toString()}
+            scrollEnabled={false}
+            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           />
-        </View>
-
-        {/* Low Price Products Section */}
-        <View style={styles.section}>
-          <SectionLabel title="Best Deals" icon="💰" />
-          <View style={styles.gridContainer}>
-            {lowPriceProducts.map((item, index) => (
-              <LowPriceCard key={item.id} item={item} index={index} />
-            ))}
-          </View>
-        </View>
-
-        {/* Search Results */}
-        {searchText.length > 0 && (
-          <View style={styles.section}>
-            <SectionLabel title="Search Results" icon="🔍" />
-            <View style={styles.searchResults}>
-              {filteredProducts.length === 0 ? (
-                <Text style={styles.noResults}>No products found</Text>
-              ) : (
-                filteredProducts.map((item, index) => (
-                  <View key={item.id} style={styles.searchResultItem}>
-                    <Image source={item.image} style={styles.searchResultImage} />
-                    <View style={styles.searchResultDetails}>
-                      <Text style={styles.searchResultName}>{item.name}</Text>
-                      <Text style={styles.searchResultCompany}>{item.company}</Text>
-                      <Text style={styles.searchResultPrice}>₹{item.price} {item.unit}</Text>
-                    </View>
-                  </View>
-                ))
-              )}
-            </View>
-          </View>
         )}
-      </Animated.ScrollView>
+
+        {/* Navigations Shortcuts */}
+        <View style={styles.shortcutsCard}>
+          <Text style={styles.shortcutTitle}>Operations Quick Redirects</Text>
+          <View style={styles.shortcutRow}>
+            <TouchableOpacity
+              style={[styles.shortcutBtn, { backgroundColor: "#e8f5e9" }]}
+              onPress={() => router.push("/(tabs)/boom" as any)}
+            >
+              <MaterialCommunityIcons name="boom-gate" size={20} color="#0f5f3c" />
+              <Text style={[styles.shortcutBtnText, { color: "#0f5f3c" }]}>Gate Control</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shortcutBtn, { backgroundColor: "#e3f2fd" }]}
+              onPress={() => router.push("/(tabs)/logs" as any)}
+            >
+              <MaterialCommunityIcons name="file-document" size={20} color="#007bff" />
+              <Text style={[styles.shortcutBtnText, { color: "#007bff" }]}>Activity Logs</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -293,319 +216,192 @@ const Dashboard = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: "#f5f7fa",
   },
-  searchContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 15,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f2f5',
-    borderRadius: 25,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+  backBtn: {
+    padding: 5,
   },
-  searchIcon: {
-    marginRight: 10,
-    fontSize: 18,
-    color: '#666',
+  refreshBtn: {
+    padding: 5,
   },
-  clearIcon: {
-    fontSize: 18,
-    color: '#666',
-    fontWeight: 'bold',
-  },
-  searchInput: {
-    flex: 1,
+  headerTitle: {
     fontSize: 16,
-    color: '#333',
-  },
-  content: {
-    flex: 1,
-    paddingTop: 70, // Space for search bar
+    fontWeight: "bold",
+    color: "#333",
   },
   scrollContent: {
-    paddingBottom: 30,
+    padding: 15,
+    paddingBottom: 40,
   },
-  section: {
+  banner: {
+    backgroundColor: "#0f5f3c",
+    borderRadius: 16,
+    padding: 22,
+    alignItems: "center",
+    marginBottom: 25,
+    elevation: 3,
+  },
+  bannerText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#fff",
+    marginTop: 10,
+  },
+  bannerSub: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.8)",
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#333",
+    marginBottom: 12,
+  },
+  metricsGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 25,
   },
-  sectionLabelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-    marginHorizontal: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-  },
-  sectionIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  sectionIconText: {
-    fontSize: 16,
-    color: '#fff',
-  },
-  sectionLabelText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  horizontalList: {
-    paddingLeft: 20,
-    paddingRight: 5,
-  },
-  topSalesCard: {
-    width: width * 0.75,
-    height: 220,
-    marginRight: 15,
-    borderRadius: 15,
-    overflow: 'hidden',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-  },
-  cardImage: {
-    flex: 1,
-    resizeMode: 'cover',
-    justifyContent: 'space-between',
-  },
-  cardImageStyle: {
-    borderRadius: 15,
-  },
-  cardOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    padding: 15,
-    justifyContent: 'space-between',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  salesBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  metricCard: {
+    width: (width - 45) / 3,
+    backgroundColor: "#fff",
     borderRadius: 12,
-  },
-  salesText: {
-    color: '#333',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  cardContent: {
-    marginBottom: 10,
-  },
-  cardTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  companyName: {
-    fontSize: 14,
-    color: '#f0f0f0',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginTop: 5,
-  },
-  price: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  unit: {
-    fontSize: 14,
-    color: '#f0f0f0',
-    marginLeft: 5,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  buyButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingVertical: 10,
-    borderRadius: 20,
-    alignItems: 'center',
-  },
-  buyButtonText: {
-    color: '#333',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 15,
-    justifyContent: 'space-between',
-  },
-  lowPriceCard: {
-    width: (width - 40) / 2,
-    height: 200,
-    marginBottom: 15,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  lowPriceImage: {
-    flex: 1,
-    resizeMode: 'cover',
-  },
-  lowPriceImageStyle: {
-    borderRadius: 12,
-  },
-  lowPriceOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
     padding: 12,
-    justifyContent: 'space-between',
+    borderLeftWidth: 4,
+    elevation: 2,
   },
-  discountBadgeContainer: {
-    alignItems: 'flex-end',
+  metricVal: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#333",
   },
-  discountBadge: {
-    backgroundColor: '#ff4757',
+  metricLabel: {
+    fontSize: 10,
+    color: "#666",
+    marginTop: 4,
+  },
+  listHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  activityCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    elevation: 1.5,
+  },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  activityIndexContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#f0f2f5",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  activityIndex: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#555",
+  },
+  activityThumb: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  activityDetails: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  activityTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  activitySub: {
+    fontSize: 11,
+    color: "#666",
+    marginTop: 2,
+  },
+  activityBadge: {
+    backgroundColor: "#f5f5f5",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  activityBadgeText: {
+    fontSize: 10,
+    color: "#555",
+    fontWeight: "500",
+  },
+  activityDurationText: {
+    fontSize: 10,
+    color: "#0f5f3c",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  emptyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 30,
+    alignItems: "center",
+    elevation: 1,
+    marginBottom: 20,
+  },
+  emptyText: {
+    fontSize: 12,
+    color: "#777",
+    marginTop: 10,
+    textAlign: "center",
+  },
+  shortcutsCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 15,
+    marginTop: 25,
+    elevation: 2,
+  },
+  shortcutTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#333",
+    marginBottom: 12,
+  },
+  shortcutRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  shortcutBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    paddingVertical: 10,
+    marginHorizontal: 5,
     borderRadius: 8,
   },
-  discountText: {
-    color: '#fff',
+  shortcutBtnText: {
     fontSize: 12,
-    fontWeight: 'bold',
-  },
-  lowPriceContent: {
-    marginTop: 'auto',
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 2,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  companyNameLow: {
-    fontSize: 12,
-    color: '#f0f0f0',
-    marginBottom: 5,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  currentPrice: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  originalPrice: {
-    fontSize: 14,
-    color: '#f0f0f0',
-    textDecorationLine: 'line-through',
-    marginLeft: 8,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  unitText: {
-    fontSize: 12,
-    color: '#f0f0f0',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  searchResults: {
-    paddingHorizontal: 20,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    alignItems: 'center',
-  },
-  searchResultImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 10,
-    marginRight: 15,
-  },
-  searchResultDetails: {
-    flex: 1,
-  },
-  searchResultName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  searchResultCompany: {
-    fontSize: 14,
-    color: '#666',
-  },
-  searchResultPrice: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2ecc71',
-    marginTop: 5,
-  },
-  noResults: {
-    textAlign: 'center',
-    fontSize: 16,
-    color: '#666',
-    marginTop: 20,
-    marginBottom: 20,
+    fontWeight: "700",
+    marginLeft: 6,
   },
 });
 
