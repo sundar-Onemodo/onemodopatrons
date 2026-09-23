@@ -60,6 +60,7 @@ export default function GateControl() {
   // Pending List (Vehicles Inside)
   const [pendingVehicles, setPendingVehicles] = useState<any[]>([]);
   const [fetchingList, setFetchingList] = useState(false);
+  const [pendingFilter, setPendingFilter] = useState<"all" | "own" | "visitor">("all");
 
   // Wheeler Dropdown Modal
   const [wheelerModalVisible, setWheelerModalVisible] = useState(false);
@@ -194,6 +195,21 @@ export default function GateControl() {
       return regClean.includes(clean) || modelClean.includes(clean) || idClean.includes(clean);
     });
   }, [activeVehicles, vehicleNumber]);
+
+  // Filtered pending vehicles inside quarry by is_own status
+  const filteredPendingVehicles = useMemo(() => {
+    if (pendingFilter === "own") {
+      return pendingVehicles.filter(
+        (v) => v.is_own === 1 || v.is_own === "1" || v.is_own === true
+      );
+    }
+    if (pendingFilter === "visitor") {
+      return pendingVehicles.filter(
+        (v) => v.is_own === 0 || v.is_own === "0" || v.is_own === false || !v.is_own
+      );
+    }
+    return pendingVehicles;
+  }, [pendingVehicles, pendingFilter]);
 
   // Compress Image
   const compressImage = async (uri: string) => {
@@ -504,21 +520,46 @@ export default function GateControl() {
     }
   };
 
-  // Trigger exit
+  // Trigger exit (Supports Barcode Scan Exit and Direct Exit)
   const triggerExit = async (vehicle: any, barcode?: string, imageObj?: any) => {
     setLoading(true);
     const now = moment().format("YYYY-MM-DD HH:mm:ss");
+    const cleanBarcode = barcode ? String(barcode).trim() : "";
+    const isDirectExit = !cleanBarcode || cleanBarcode === "0";
+
     console.log(`\n================== 🚪 [BOOM EXIT API CALL] ==================`);
-    console.log(`⏰ Timestamp : ${now}`);
-    console.log(`🚗 Truck     : ${vehicle?.truck}`);
-    console.log(`🏷️ Barcode   : ${barcode || "None"}`);
-    console.log(`🖼️ Exit Image: ${imageObj?.uri ? "Attached" : "None"}`);
-    console.log(`🏢 Company ID: ${companyId || 23}`);
+    console.log(`⏰ Timestamp   : ${now}`);
+    console.log(`🚗 Truck       : ${vehicle?.truck}`);
+    console.log(`🔄 Exit Type   : ${isDirectExit ? "Direct Exit (barcode=0)" : "Barcode Scan Exit"}`);
+    console.log(`🏷️ Barcode     : ${isDirectExit ? "0" : cleanBarcode}`);
+    console.log(`⭐ is_own      : ${vehicle?.is_own !== undefined ? vehicle.is_own : 1}`);
+    console.log(`🖼️ Exit Image  : ${imageObj?.uri ? "Attached" : "None"}`);
+    console.log(`🏢 Company ID  : ${companyId || 23}`);
 
     try {
       const formData = new FormData();
-      if (barcode) {
-        formData.append("barcode", String(barcode).trim());
+
+      if (isDirectExit) {
+        // Direct Exit: send barcode: 0, is_own, truck, company_id, and optional exit_image
+        formData.append("barcode", "0");
+        const ownVal =
+          vehicle?.is_own !== undefined && vehicle?.is_own !== null
+            ? String(vehicle.is_own ? 1 : 0)
+            : "1";
+        formData.append("is_own", ownVal);
+        if (vehicle?.truck) {
+          formData.append("truck", vehicle.truck);
+        }
+        formData.append("company_id", String(companyId || 23));
+      } else {
+        // Barcode Scan Exit
+        formData.append("barcode", cleanBarcode);
+        if (vehicle?.truck) {
+          formData.append("truck", vehicle.truck);
+        }
+        if (companyId) {
+          formData.append("company_id", String(companyId));
+        }
       }
 
       if (imageObj?.uri) {
@@ -549,8 +590,18 @@ export default function GateControl() {
       console.log(`📦 [BOOM EXIT] Response:`, JSON.stringify(res.data, null, 2));
       console.log(`============================================================\n`);
 
-      if (res.data.status === "success" || res.data.success) {
-        const truckName = res.data?.data?.truck || vehicle?.truck || "Vehicle";
+      const resData = res.data;
+      const statusLabel = resData?.data?.status_label || resData?.status_label;
+      const isStatusExited =
+        typeof statusLabel === "string" &&
+        statusLabel.trim().toLowerCase() === "exited";
+      const isSuccess =
+        resData?.status === "success" ||
+        resData?.success === true ||
+        isStatusExited;
+
+      if (isSuccess) {
+        const truckName = resData?.data?.truck || vehicle?.truck || "Vehicle";
 
         // Trigger remote gate opening command strictly using configured boomexit URL from boomsettings
         const doorResult = await triggerRemoteDoorOpen({
@@ -569,7 +620,11 @@ export default function GateControl() {
           visible: true,
           type: "exit_success",
           title: "Vehicle Exit Completed",
-          subtitle: res.data.message || "Vehicle marked as exited and gate open command triggered.",
+          subtitle:
+            resData.message ||
+            (isStatusExited
+              ? `Vehicle ${truckName} status updated to Exited and gate opened.`
+              : "Vehicle marked as exited and gate open command triggered."),
           truck: truckName,
           vehicleType: vehicle?.vehicle_type,
           duration:
@@ -591,7 +646,7 @@ export default function GateControl() {
           visible: true,
           type: "error",
           title: "Exit Failed",
-          subtitle: res.data.message || "Failed to log exit.",
+          subtitle: resData?.message || "Failed to log exit.",
           truck: vehicle?.truck,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
@@ -671,6 +726,7 @@ export default function GateControl() {
     const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "--");
     const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
     const imageUrl = resolveImageUrl(rawImg);
+    const isOwn = item.is_own === 1 || item.is_own === "1" || item.is_own === true;
 
     return (
       <View style={styles.card}>
@@ -700,10 +756,22 @@ export default function GateControl() {
           )}
 
           <View style={styles.cardDetails}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
               <Text style={styles.cardTruckText}>{item.truck}</Text>
-              <View style={styles.badgeInside}>
-                <Text style={styles.badgeInsideText}>{item.status_label || "Inside"}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                {isOwn ? (
+                  <View style={styles.pendingOwnBadge}>
+                    <Ionicons name="star" size={10} color="#99731e" style={{ marginRight: 2 }} />
+                    <Text style={styles.pendingOwnBadgeText}>Own Vehicle</Text>
+                  </View>
+                ) : (
+                  <View style={styles.pendingVisitorBadge}>
+                    <Text style={styles.pendingVisitorBadgeText}>Visitor</Text>
+                  </View>
+                )}
+                <View style={styles.badgeInside}>
+                  <Text style={styles.badgeInsideText}>{item.status_label || "Inside"}</Text>
+                </View>
               </View>
             </View>
             <Text style={styles.cardTypeText}>{item.vehicle_type}</Text>
@@ -921,7 +989,7 @@ export default function GateControl() {
                           </View>
                         </View>
                         <Text style={styles.suggestionSubText}>
-                          Model: {item.vehicle_model || "Standard"} • ID: #{item.id}
+                          Model: {item.vehicle_model || "Standard"}
                         </Text>
                       </View>
                       {isSelected ? (
@@ -946,10 +1014,7 @@ export default function GateControl() {
                       <MaterialCommunityIcons name="plus-circle" size={18} color="#0288d1" />
                       <View style={{ marginLeft: 8, flex: 1 }}>
                         <Text style={styles.suggestionNewTitle}>
-                          Use as New Vehicle: "{vehicleNumber}"
-                        </Text>
-                        <Text style={styles.suggestionNewSub}>
-                          Tap to use this unlisted registration number
+                          Use: "{vehicleNumber}"
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -958,53 +1023,30 @@ export default function GateControl() {
             </View>
           )}
 
-          {/* Matched / New Vehicle Indicator Banner */}
+          {/* Matched Vehicle Indicator Banner */}
           {selectedVehicle ? (
             <View style={styles.matchedVehicleBanner}>
               <View style={styles.matchedVehicleHeader}>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <MaterialCommunityIcons name="check-decagram" size={18} color="#2e7d32" />
-                  <Text style={styles.matchedVehicleTitle}>Active Vehicle Matched</Text>
+                  <Text style={styles.matchedVehicleTitle}>Registered Vehicle</Text>
                 </View>
-                <View
-                  style={[
-                    styles.ownBadge,
-                    {
-                      backgroundColor:
-                        selectedVehicle.is_own === 1 ? "#e8f5e9" : "#fff3e0",
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.ownBadgeText,
-                      {
-                        color:
-                          selectedVehicle.is_own === 1 ? "#2e7d32" : "#e65100",
-                      },
-                    ]}
-                  >
-                    {selectedVehicle.is_own === 1 ? "Own Fleet (is_own: 1)" : "Visitor / Third-Party (is_own: 0)"}
-                  </Text>
-                </View>
+                {selectedVehicle.is_own === 1 ? (
+                  <View style={styles.ownBadgeMatched}>
+                    <Ionicons name="star" size={10} color="#99731e" style={{ marginRight: 2 }} />
+                    <Text style={styles.ownBadgeMatchedText}>Own Vehicle</Text>
+                  </View>
+                ) : (
+                  <View style={styles.visitorBadgeMatched}>
+                    <Text style={styles.visitorBadgeMatchedText}>Visitor</Text>
+                  </View>
+                )}
               </View>
               <View style={styles.matchedVehicleDetailsRow}>
                 <Text style={styles.matchedVehicleDetail}>
-                  📋 Model: <Text style={{ fontWeight: "700", color: "#0f5f3c" }}>{selectedVehicle.vehicle_model || vehicleType}</Text>
+                  Model: <Text style={{ fontWeight: "700", color: "#0f5f3c" }}>{selectedVehicle.vehicle_model || vehicleType}</Text>
                 </Text>
-                {selectedVehicle.id ? (
-                  <Text style={styles.matchedVehicleDetail}>
-                    🆔 Vehicle ID: <Text style={{ fontWeight: "700", color: "#333" }}>#{selectedVehicle.id}</Text>
-                  </Text>
-                ) : null}
               </View>
-            </View>
-          ) : vehicleNumber.trim() ? (
-            <View style={styles.newVehicleBanner}>
-              <MaterialCommunityIcons name="information" size={16} color="#0288d1" />
-              <Text style={styles.newVehicleText}>
-                New Registration Number ({vehicleNumber}) • Will be logged directly to Boom Entry
-              </Text>
             </View>
           ) : null}
 
@@ -1054,6 +1096,44 @@ export default function GateControl() {
           </TouchableOpacity>
         </View>
 
+        {/* Filter Chips for Pending Vehicles */}
+        {pendingVehicles.length > 0 && (
+          <View style={styles.pendingFilterRow}>
+            <TouchableOpacity
+              style={[styles.pendingFilterChip, pendingFilter === "all" && styles.pendingFilterChipActive]}
+              onPress={() => setPendingFilter("all")}
+            >
+              <Text style={[styles.pendingFilterText, pendingFilter === "all" && styles.pendingFilterTextActive]}>
+                All ({pendingVehicles.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.pendingFilterChip, pendingFilter === "own" && styles.pendingFilterChipActive]}
+              onPress={() => setPendingFilter("own")}
+            >
+              <Ionicons
+                name="star"
+                size={12}
+                color={pendingFilter === "own" ? "#0f5f3c" : "#b38a2c"}
+                style={{ marginRight: 3 }}
+              />
+              <Text style={[styles.pendingFilterText, pendingFilter === "own" && styles.pendingFilterTextActive]}>
+                Own ({pendingVehicles.filter((v) => v.is_own === 1 || v.is_own === "1" || v.is_own === true).length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.pendingFilterChip, pendingFilter === "visitor" && styles.pendingFilterChipActive]}
+              onPress={() => setPendingFilter("visitor")}
+            >
+              <Text style={[styles.pendingFilterText, pendingFilter === "visitor" && styles.pendingFilterTextActive]}>
+                Visitor ({pendingVehicles.filter((v) => !v.is_own || v.is_own === 0 || v.is_own === "0").length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {fetchingList ? (
           <ActivityIndicator size="large" color="#0f5f3c" style={{ marginVertical: 30 }} />
         ) : pendingVehicles.length === 0 ? (
@@ -1061,9 +1141,14 @@ export default function GateControl() {
             <MaterialCommunityIcons name="check-all" size={48} color="#999" />
             <Text style={styles.emptyText}>All vehicles have exited the quarry.</Text>
           </View>
+        ) : filteredPendingVehicles.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialCommunityIcons name="filter-remove-outline" size={38} color="#999" />
+            <Text style={styles.emptyText}>No vehicles match the selected filter.</Text>
+          </View>
         ) : (
           <FlatList
-            data={pendingVehicles}
+            data={filteredPendingVehicles}
             renderItem={renderPendingItem}
             keyExtractor={(item, index) => item.id?.toString() || index.toString()}
             scrollEnabled={false}
@@ -1199,6 +1284,17 @@ export default function GateControl() {
                 </View>
 
                 <View style={styles.exitPillRow}>
+                  {exitVehicle?.is_own === 1 || exitVehicle?.is_own === "1" || exitVehicle?.is_own === true ? (
+                    <View style={styles.exitOwnBadge}>
+                      <Ionicons name="star" size={12} color="#99731e" style={{ marginRight: 3 }} />
+                      <Text style={styles.exitOwnBadgeText}>Own Vehicle</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.exitVisitorBadge}>
+                      <Text style={styles.exitVisitorBadgeText}>Visitor</Text>
+                    </View>
+                  )}
+
                   <View style={styles.exitPill}>
                     <MaterialCommunityIcons
                       name={
@@ -2112,14 +2208,33 @@ const styles = StyleSheet.create({
     color: "#166534",
     marginLeft: 5,
   },
-  ownBadge: {
+  ownBadgeMatched: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(212, 178, 98, 0.18)",
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(212, 178, 98, 0.4)",
   },
-  ownBadgeText: {
+  ownBadgeMatchedText: {
     fontSize: 10,
     fontWeight: "700",
+    color: "#99731e",
+  },
+  visitorBadgeMatched: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  visitorBadgeMatchedText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#64748b",
   },
   matchedVehicleDetailsRow: {
     flexDirection: "row",
@@ -2133,21 +2248,89 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#334155",
   },
-  newVehicleBanner: {
+  pendingOwnBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f0f9ff",
+    backgroundColor: "rgba(212, 178, 98, 0.18)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: "#bae6fd",
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 10,
+    borderColor: "rgba(212, 178, 98, 0.4)",
   },
-  newVehicleText: {
-    fontSize: 11,
-    color: "#0369a1",
-    marginLeft: 6,
+  pendingOwnBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#99731e",
+  },
+  pendingVisitorBadge: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  pendingVisitorBadgeText: {
+    fontSize: 10,
     fontWeight: "600",
-    flex: 1,
+    color: "#64748b",
+  },
+  pendingFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 8,
+  },
+  pendingFilterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  pendingFilterChipActive: {
+    backgroundColor: "rgba(15, 95, 60, 0.1)",
+    borderColor: "#0f5f3c",
+  },
+  pendingFilterText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#666",
+  },
+  pendingFilterTextActive: {
+    color: "#0f5f3c",
+    fontWeight: "700",
+  },
+  exitOwnBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(212, 178, 98, 0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(212, 178, 98, 0.5)",
+  },
+  exitOwnBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#99731e",
+  },
+  exitVisitorBadge: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  exitVisitorBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748b",
   },
 });

@@ -21,6 +21,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -600,52 +601,15 @@ export default function OwnVehiclesScreen() {
                 />
               </View>
 
-              {/* Own Vehicle Toggle Selector */}
-              <Text style={styles.label}>Ownership Classification:</Text>
-              <View style={styles.ownToggleContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.ownToggleOption,
-                    isOwnVehicle === 1 && styles.ownToggleOptionActive,
-                  ]}
-                  onPress={() => setIsOwnVehicle(1)}
-                >
-                  <Ionicons
-                    name="star"
-                    size={16}
-                    color={isOwnVehicle === 1 ? "#0f5f3c" : "#888"}
-                  />
-                  <Text
-                    style={[
-                      styles.ownToggleText,
-                      isOwnVehicle === 1 && styles.ownToggleTextActive,
-                    ]}
-                  >
-                    Company Own (1)
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.ownToggleOption,
-                    isOwnVehicle === 0 && styles.ownToggleOptionActive,
-                  ]}
-                  onPress={() => setIsOwnVehicle(0)}
-                >
-                  <Ionicons
-                    name="people-outline"
-                    size={16}
-                    color={isOwnVehicle === 0 ? "#0f5f3c" : "#888"}
-                  />
-                  <Text
-                    style={[
-                      styles.ownToggleText,
-                      isOwnVehicle === 0 && styles.ownToggleTextActive,
-                    ]}
-                  >
-                    Visitor / Other (0)
-                  </Text>
-                </TouchableOpacity>
+              {/* Own Vehicle Toggle Row */}
+              <View style={styles.ownVehicleRow}>
+                <Text style={styles.ownVehicleLabel}>Own Vehicle</Text>
+                <Switch
+                  value={isOwnVehicle === 1}
+                  onValueChange={(val) => setIsOwnVehicle(val ? 1 : 0)}
+                  trackColor={{ false: "#cbd5e1", true: "#0f5f3c" }}
+                  thumbColor={isOwnVehicle === 1 ? "#fff" : "#f4f3f4"}
+                />
               </View>
 
               {/* Vehicle Type Dropdown */}
@@ -1051,36 +1015,23 @@ const styles = StyleSheet.create({
     color: "#333",
     fontWeight: "600",
   },
-  ownToggleContainer: {
+  ownVehicleRow: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
-  },
-  ownToggleOption: {
-    flex: 1,
-    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    backgroundColor: "#fafafa",
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "#e0e0e0",
-    backgroundColor: "#fafafa",
-    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 12,
+    marginBottom: 4,
   },
-  ownToggleOptionActive: {
-    borderColor: "#0f5f3c",
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
-  },
-  ownToggleText: {
-    fontSize: 13,
+  ownVehicleLabel: {
+    fontSize: 14,
     fontWeight: "600",
-    color: "#777",
-  },
-  ownToggleTextActive: {
-    color: "#0f5f3c",
-    fontWeight: "700",
+    color: "#333",
   },
   dropdownTrigger: {
     flexDirection: "row",

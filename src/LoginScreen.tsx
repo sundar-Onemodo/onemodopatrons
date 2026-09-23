@@ -138,6 +138,7 @@ export default function LoginFlow() {
                   <TextInput
                     style={styles.input}
                     placeholder="Mobile Number"
+                    placeholderTextColor={"#000"}
                     keyboardType="phone-pad"
                     maxLength={10}
                     value={mobile}
@@ -159,6 +160,7 @@ export default function LoginFlow() {
                   <TextInput
                     style={styles.input}
                     placeholder="Password"
+                    placeholderTextColor={"#000"}
                     secureTextEntry={!showPassword}
                     value={password}
                     onChangeText={(text) => setPassword(text)}
@@ -245,6 +247,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     paddingVertical: 12,
+    color:'#000'
   },
   eyeIcon: {
     marginLeft: 8,
