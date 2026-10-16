@@ -32,6 +32,8 @@ export interface GateStatusModalProps {
   imageUri?: string;
   confirmText?: string;
   cancelText?: string;
+  companyId?: string | number;
+  showCloseBoom?: boolean;
   onConfirm?: () => void;
   onClose: () => void;
 }
@@ -51,15 +53,16 @@ export const GateStatusModal: React.FC<GateStatusModalProps> = ({
   imageUri,
   confirmText,
   cancelText,
+  companyId = 23,
   onConfirm,
   onClose,
 }) => {
-  if (!visible) return null;
-
   const isEntry = type === "entry_success";
   const isExit = type === "exit_success";
   const isConfirm = type === "confirm_exit";
   const isError = type === "error";
+
+  if (!visible) return null;
 
   const getThemeColor = () => {
     if (isError) return "#e53935";
@@ -296,6 +299,7 @@ export const GateStatusModal: React.FC<GateStatusModalProps> = ({
     </Modal>
   );
 };
+
 
 const styles = StyleSheet.create({
   overlay: {
@@ -541,3 +545,4 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
+

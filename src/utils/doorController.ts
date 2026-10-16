@@ -4,8 +4,8 @@ import { BASE_URL } from "../components/BaseUrlApi";
 import { store } from "../store/store";
 
 export interface BoomSettings {
-  boomentry: string;
-  boomexit: string;
+  boomentry: string; // URL to OPEN the boom barrier (e.g., http://192.168.1.64:5000/relay/2/on)
+  boomexit: string;  // URL to CLOSE the boom barrier (e.g., http://192.168.1.64:5000/relay/1/on)
   company_id?: number | string;
 }
 
@@ -14,7 +14,14 @@ export const DOOR_CONTROLLER_TIMEOUT = 8000;
 export interface DoorOpenContext {
   truck?: string;
   action?: string;
-  type?: "entry" | "exit";
+  type?: "entry" | "exit" | "open" | "close";
+  companyId?: string | number;
+  customUrl?: string;
+}
+
+export interface DoorCloseContext {
+  truck?: string;
+  action?: string;
   companyId?: string | number;
   customUrl?: string;
 }
@@ -61,7 +68,7 @@ export const fetchAndSaveBoomSettings = async (
       timeout: 10000,
     });
 
-    console.log("Response  ", response.data)
+    console.log("Response boomsettings: ", response.data);
 
     if (
       response.data &&
@@ -130,33 +137,34 @@ export const getBoomSettings = async (
 };
 
 /**
- * Triggers the remote door / boom barrier open command with comprehensive logging.
- * URL is resolved strictly from the boomsettings API response.
+ * Triggers the remote door / boom barrier OPEN command.
+ * Uses `boomentry` URL (Relay 2) for both Entry vehicle and Exit vehicle opening.
  */
 export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
   const startTime = Date.now();
   const contextInfo = context?.truck ? `[${context.truck}] ` : "";
-  const type = context?.type || "entry";
   const cid = context?.companyId || 23;
 
-  // 1. Resolve Target URL strictly from API settings
+  // If explicitly requested to close via type === "close", redirect to triggerRemoteDoorClose
+  if (context?.type === "close") {
+    return triggerRemoteDoorClose(context);
+  }
+
+  // 1. Resolve Target URL strictly from API settings (boomentry is OPEN URL)
   let targetUrl = context?.customUrl ? sanitizeBoomUrl(context.customUrl) : "";
 
   if (!targetUrl) {
     const settings = await getBoomSettings(cid);
     if (settings) {
-      targetUrl =
-        type === "exit"
-          ? sanitizeBoomUrl(settings.boomexit)
-          : sanitizeBoomUrl(settings.boomentry);
+      targetUrl = sanitizeBoomUrl(settings.boomentry);
     }
   }
 
   // If no URL configured in backend API response
   if (!targetUrl) {
     const duration = Date.now() - startTime;
-    const errorMsg = `No boom ${type} URL found from API for company ID ${cid}`;
-    console.warn(`❌ [DOOR CONTROLLER] FAILED (${duration}ms): ${errorMsg}`);
+    const errorMsg = `No boom open URL (boomentry) found from API for company ID ${cid}`;
+    console.warn(`❌ [DOOR CONTROLLER] OPEN FAILED (${duration}ms): ${errorMsg}`);
     return {
       success: false,
       error: errorMsg,
@@ -167,13 +175,12 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
   console.log(`\n================== [DOOR CONTROLLER] REMOTE OPEN ==================`);
   console.log(`⏰ Timestamp : ${new Date().toISOString()}`);
   if (context?.truck || context?.action) {
-    console.log(`🚗 Context   : ${contextInfo}${context?.action || ""}`);
+    console.log(`🚗 Context   : ${contextInfo}${context?.action || "Gate Open"}`);
   }
-  console.log(`🚪 Gate Type : ${type.toUpperCase()}`);
+  console.log(`🚪 Action    : OPEN BOOM GATE`);
   console.log(`🌐 Target URL: ${targetUrl}`);
 
   try {
-    // Note: ZKBio CVSecurity / ZKTeco requires HTTP POST method
     const response = await axios.post(targetUrl, null, {
       timeout: DOOR_CONTROLLER_TIMEOUT,
     });
@@ -181,8 +188,10 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
     const duration = Date.now() - startTime;
     const data = response.data;
 
-    // Check payload business status (code: 0, ret: 0, success: true, or message: "success")
     const isOperationSuccess =
+      response.status === 200 ||
+      response.status === 201 ||
+      response.status === 204 ||
       data?.code === 0 ||
       data?.code === "0" ||
       data?.ret === 0 ||
@@ -192,7 +201,7 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
       data?.success === true;
 
     if (isOperationSuccess) {
-      console.log(`✅ [DOOR CONTROLLER] SUCCESS (${duration}ms)`);
+      console.log(`✅ [DOOR CONTROLLER] OPEN SUCCESS (${duration}ms)`);
       console.log(`📊 HTTP Status: ${response.status} ${response.statusText || ""}`);
       console.log(`📦 Payload    :`, JSON.stringify(data, null, 2));
       console.log(`===================================================================\n`);
@@ -200,7 +209,7 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
       return { success: true, data, duration, targetUrl };
     } else {
       const errMsg = data?.msg || data?.message || "Door controller operation failed";
-      console.warn(`⚠️ [DOOR CONTROLLER] OPERATION FAILED (${duration}ms)`);
+      console.warn(`⚠️ [DOOR CONTROLLER] OPEN FAILED (${duration}ms)`);
       console.warn(`📊 HTTP Status: ${response.status}`);
       console.warn(`📦 Payload    :`, JSON.stringify(data, null, 2));
       console.warn(`⚠️ Error Message: ${errMsg}`);
@@ -216,7 +225,7 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
     }
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    console.warn(`❌ [DOOR CONTROLLER] FAILED (${duration}ms)`);
+    console.warn(`❌ [DOOR CONTROLLER] OPEN FAILED (${duration}ms)`);
 
     if (error.response) {
       console.warn(`📊 HTTP Status Code: ${error.response.status}`);
@@ -244,3 +253,117 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
     };
   }
 };
+
+/**
+ * Triggers the remote door / boom barrier CLOSE command.
+ * Uses `boomexit` URL (Relay 1) to close the boom gate.
+ */
+export const triggerRemoteDoorClose = async (context?: DoorCloseContext) => {
+  const startTime = Date.now();
+  const contextInfo = context?.truck ? `[${context.truck}] ` : "";
+  const cid = context?.companyId || 23;
+
+  // 1. Resolve Target URL strictly from API settings (boomexit is CLOSE URL)
+  let targetUrl = context?.customUrl ? sanitizeBoomUrl(context.customUrl) : "";
+
+  if (!targetUrl) {
+    const settings = await getBoomSettings(cid);
+    if (settings) {
+      targetUrl = sanitizeBoomUrl(settings.boomexit);
+    }
+  }
+
+  // If no URL configured in backend API response
+  if (!targetUrl) {
+    const duration = Date.now() - startTime;
+    const errorMsg = `No boom close URL (boomexit) found from API for company ID ${cid}`;
+    console.warn(`❌ [DOOR CONTROLLER] CLOSE FAILED (${duration}ms): ${errorMsg}`);
+    return {
+      success: false,
+      error: errorMsg,
+      duration,
+    };
+  }
+
+  console.log(`\n================== [DOOR CONTROLLER] REMOTE CLOSE ==================`);
+  console.log(`⏰ Timestamp : ${new Date().toISOString()}`);
+  if (context?.truck || context?.action) {
+    console.log(`🚗 Context   : ${contextInfo}${context?.action || "Gate Close"}`);
+  }
+  console.log(`🚪 Action    : CLOSE BOOM GATE`);
+  console.log(`🌐 Target URL: ${targetUrl}`);
+
+  try {
+    const response = await axios.post(targetUrl, null, {
+      timeout: DOOR_CONTROLLER_TIMEOUT,
+    });
+
+    const duration = Date.now() - startTime;
+    const data = response.data;
+
+    const isOperationSuccess =
+      response.status === 200 ||
+      response.status === 201 ||
+      response.status === 204 ||
+      data?.code === 0 ||
+      data?.code === "0" ||
+      data?.ret === 0 ||
+      data?.ret === "0" ||
+      data?.message?.toLowerCase() === "success" ||
+      data?.msg?.toLowerCase() === "success" ||
+      data?.success === true;
+
+    if (isOperationSuccess) {
+      console.log(`✅ [DOOR CONTROLLER] CLOSE SUCCESS (${duration}ms)`);
+      console.log(`📊 HTTP Status: ${response.status} ${response.statusText || ""}`);
+      console.log(`📦 Payload    :`, JSON.stringify(data, null, 2));
+      console.log(`===================================================================\n`);
+
+      return { success: true, data, duration, targetUrl };
+    } else {
+      const errMsg = data?.msg || data?.message || "Door controller close operation failed";
+      console.warn(`⚠️ [DOOR CONTROLLER] CLOSE FAILED (${duration}ms)`);
+      console.warn(`📊 HTTP Status: ${response.status}`);
+      console.warn(`📦 Payload    :`, JSON.stringify(data, null, 2));
+      console.warn(`⚠️ Error Message: ${errMsg}`);
+      console.log(`===================================================================\n`);
+
+      return {
+        success: false,
+        error: errMsg,
+        data,
+        duration,
+        targetUrl,
+      };
+    }
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    console.warn(`❌ [DOOR CONTROLLER] CLOSE FAILED (${duration}ms)`);
+
+    if (error.response) {
+      console.warn(`📊 HTTP Status Code: ${error.response.status}`);
+      console.warn(`📦 Response Body   :`, error.response.data);
+    } else if (error.request) {
+      console.warn(
+        `📡 Network Failure : No response received from target URL (${targetUrl}). ` +
+        `Verify device is on the local LAN / Wi-Fi and port is reachable.`
+      );
+      console.warn(`⚠️ Error Message   : ${error.message}`);
+    } else {
+      console.warn(`⚠️ Error Details   : ${error.message}`);
+    }
+    console.log(`===================================================================\n`);
+
+    return {
+      success: false,
+      error:
+        error?.response?.data?.message ||
+        error?.response?.data?.msg ||
+        error?.message ||
+        "Door controller unreachable",
+      duration,
+      targetUrl,
+    };
+  }
+};
+

@@ -1,7 +1,10 @@
 import { BASE_URL } from "@/src/components/BaseUrlApi";
 import { GateStatusModal, GateStatusModalProps } from "@/src/components/GateStatusModal";
 import { RootState } from "@/src/store/store";
-import { fetchAndSaveBoomSettings, triggerRemoteDoorOpen } from "@/src/utils/doorController";
+import {
+  fetchAndSaveBoomSettings,
+  triggerRemoteDoorOpen,
+} from "@/src/utils/doorController";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
 import { formatVehiclePlate, normalizeVehicleInput } from "@/src/utils/vehicleFormatter";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -45,8 +48,7 @@ export interface ActiveVehicleItem {
 
 export default function GateControl() {
   const insets = useSafeAreaInsets();
-  const [vehicleType, setVehicleType] = useState("Car"); // Car, Bike, Truck, Others
-  const [wheelerType, setWheelerType] = useState("6 Wheeler"); // Default wheeler type
+  const [wheelerType, setWheelerType] = useState("6 Wheeler"); // Default truck wheeler type
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [entryImage, setEntryImage] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -311,7 +313,7 @@ export default function GateControl() {
       setShowSuggestions(false);
     }
 
-    // Auto-populate vehicle_type and wheelerType based on vehicle_model
+    // Auto-populate wheelerType based on vehicle_model
     const model = (item.vehicle_model || item.vehicle_type || "").trim();
     const modelLower = model.toLowerCase();
 
@@ -323,7 +325,6 @@ export default function GateControl() {
     );
 
     if (matchedWheeler) {
-      setVehicleType("Truck");
       setWheelerType(matchedWheeler);
     } else if (
       modelLower.includes("wheeler") ||
@@ -331,7 +332,6 @@ export default function GateControl() {
       modelLower.includes("lorry") ||
       modelLower.includes("tipper")
     ) {
-      setVehicleType("Truck");
       const digits = model.match(/\d+/);
       if (digits) {
         const reconstructed = `${digits[0]} Wheeler`;
@@ -340,16 +340,6 @@ export default function GateControl() {
       } else {
         setWheelerType("6 Wheeler");
       }
-    } else if (modelLower.includes("car")) {
-      setVehicleType("Car");
-    } else if (
-      modelLower.includes("bike") ||
-      modelLower.includes("motorcycle") ||
-      modelLower.includes("scooter")
-    ) {
-      setVehicleType("Bike");
-    } else if (model) {
-      setVehicleType("Others");
     }
   };
 
@@ -400,7 +390,7 @@ export default function GateControl() {
 
     setLoading(true);
     try {
-      const typeToSend = vehicleType === "Truck" ? wheelerType : vehicleType;
+      const typeToSend = wheelerType;
       const now = moment().format("YYYY-MM-DD HH:mm:ss");
 
       const formData = new FormData();
@@ -455,7 +445,6 @@ export default function GateControl() {
         const doorResult = await triggerRemoteDoorOpen({
           truck: formattedTruck,
           action: "Register Entry & Open Gate",
-          type: "entry",
           companyId: companyId || 23,
         });
 
@@ -472,6 +461,7 @@ export default function GateControl() {
             ? "Boom barrier OPEN command triggered successfully ✅"
             : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
           imageUri: entryImage?.uri,
+          companyId: companyId || 23,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
 
@@ -603,12 +593,12 @@ export default function GateControl() {
       if (isSuccess) {
         const truckName = resData?.data?.truck || vehicle?.truck || "Vehicle";
 
-        // Trigger remote gate opening command strictly using configured boomexit URL from boomsettings
+        // Trigger remote gate opening command strictly using configured boomentry URL from boomsettings
+        const exitCompanyId = companyId || vehicle?.company_id || 23;
         const doorResult = await triggerRemoteDoorOpen({
           truck: truckName,
           action: "Vehicle Exit & Open Gate",
-          type: "exit",
-          companyId: companyId || 23,
+          companyId: exitCompanyId,
         });
 
         setExitModalVisible(false);
@@ -637,6 +627,7 @@ export default function GateControl() {
           barrierMessage: doorResult.success
             ? "Boom barrier OPEN command triggered successfully ✅"
             : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+          companyId: exitCompanyId,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
 
@@ -814,50 +805,22 @@ export default function GateControl() {
 
         {/* LOG NEW ENTRY CARD */}
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Record New Entry</Text>
-
-          {/* Vehicle Type Toggle */}
-          <Text style={styles.inputLabel}>Select Vehicle Type:</Text>
-          <View style={styles.typeSelectorRow}>
-            {[
-              { label: "Car", icon: "car" },
-              { label: "Bike", icon: "motorbike" },
-              { label: "Truck", icon: "truck" },
-              { label: "Others", icon: "dots-horizontal" },
-            ].map((type) => {
-              const isActive = vehicleType === type.label;
-              return (
-                <TouchableOpacity
-                  key={type.label}
-                  style={[styles.typeButton, isActive && styles.typeButtonActive]}
-                  onPress={() => setVehicleType(type.label)}
-                >
-                  <MaterialCommunityIcons
-                    name={type.icon as any}
-                    size={24}
-                    color={isActive ? "#fff" : "#555"}
-                  />
-                  <Text style={[styles.typeText, isActive && styles.typeTextActive]}>
-                    {type.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <Text style={styles.formTitle}>Record Truck Entry</Text>
 
           {/* Dynamic Wheeler Selector for Truck */}
-          {vehicleType === "Truck" && (
-            <View style={styles.wheelerSection}>
-              <Text style={styles.inputLabel}>Select Truck Wheeler Count:</Text>
-              <TouchableOpacity
-                style={styles.dropdownTrigger}
-                onPress={() => setWheelerModalVisible(true)}
-              >
+          <View style={styles.wheelerSection}>
+            <Text style={styles.inputLabel}>Select Truck Wheeler Count:</Text>
+            <TouchableOpacity
+              style={styles.dropdownTrigger}
+              onPress={() => setWheelerModalVisible(true)}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <MaterialCommunityIcons name="truck" size={20} color="#0f5f3c" />
                 <Text style={styles.dropdownTriggerText}>{wheelerType}</Text>
-                <Ionicons name="chevron-down" size={20} color="#0f5f3c" />
-              </TouchableOpacity>
-            </View>
-          )}
+              </View>
+              <Ionicons name="chevron-down" size={20} color="#0f5f3c" />
+            </TouchableOpacity>
+          </View>
 
           {/* Single Unified Searchable Input for Vehicle Registration Number */}
           <View style={styles.inputLabelRow}>
@@ -1044,7 +1007,7 @@ export default function GateControl() {
               </View>
               <View style={styles.matchedVehicleDetailsRow}>
                 <Text style={styles.matchedVehicleDetail}>
-                  Model: <Text style={{ fontWeight: "700", color: "#0f5f3c" }}>{selectedVehicle.vehicle_model || vehicleType}</Text>
+                  Model: <Text style={{ fontWeight: "700", color: "#0f5f3c" }}>{selectedVehicle.vehicle_model || wheelerType}</Text>
                 </Text>
               </View>
             </View>

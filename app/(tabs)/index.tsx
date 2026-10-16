@@ -1,6 +1,10 @@
 import { BASE_URL } from "@/src/components/BaseUrlApi";
 import { resetAuth } from "@/src/store/authSlice";
 import { RootState } from "@/src/store/store";
+import {
+  fetchAndSaveBoomSettings,
+  triggerRemoteDoorOpen,
+} from "@/src/utils/doorController";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
 import { AntDesign, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -35,6 +39,7 @@ export default function HomeScreen() {
   const [time, setTime] = useState(moment().format("HH:mm A"));
   const locationName = "Secure Gate Terminal";
   const [loading, setLoading] = useState(false);
+  const [gateOperating, setGateOperating] = useState<"open" | "close" | null>(null);
 
   const dispatch = useDispatch();
   const { authToken, username, companyId } = useSelector(
@@ -98,8 +103,35 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchDashboardData();
-    }, [companyId])
+      if (companyId) {
+        fetchAndSaveBoomSettings(companyId, authToken || undefined);
+      }
+    }, [companyId, authToken])
   );
+
+
+
+  const handleOpenBoom = async () => {
+    setGateOperating("open");
+    try {
+      const res = await triggerRemoteDoorOpen({
+        companyId: companyId || 23,
+        action: "Dashboard Home Open Boom",
+      });
+      if (res.success) {
+        Alert.alert("Success ✅", "Boom barrier OPEN signal sent successfully to controller!");
+      } else {
+        Alert.alert(
+          "Gate Notice ⚠️",
+          res.error || "Boom barrier controller unreachable on local Wi-Fi / LAN."
+        );
+      }
+    } catch (e: any) {
+      Alert.alert("Error ❌", e.message || "Failed to trigger open command.");
+    } finally {
+      setGateOperating(null);
+    }
+  };
 
   const handleLogout = async () => {
     Alert.alert("Confirm Logout", "Are you sure you want to log out?", [
@@ -234,9 +266,10 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Quick Actions */}
+        {/* Quick Operations */}
         <Text style={styles.sectionTitle}>Quick Operations</Text>
         <View style={styles.actionGrid}>
+          {/* Gate Entry */}
           <TouchableOpacity
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/boom" as any)}
@@ -247,6 +280,7 @@ export default function HomeScreen() {
             <Text style={styles.actionText}>Gate Entry</Text>
           </TouchableOpacity>
 
+          {/* Scan & Exit */}
           <TouchableOpacity
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/boom" as any)}
@@ -257,6 +291,7 @@ export default function HomeScreen() {
             <Text style={styles.actionText}>Scan & Exit</Text>
           </TouchableOpacity>
 
+          {/* View Logs */}
           <TouchableOpacity
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/logs" as any)}
@@ -267,6 +302,7 @@ export default function HomeScreen() {
             <Text style={styles.actionText}>View Logs</Text>
           </TouchableOpacity>
 
+          {/* Own Vehicles */}
           <TouchableOpacity
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/own-vehicles" as any)}

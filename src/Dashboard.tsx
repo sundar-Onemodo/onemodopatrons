@@ -1,6 +1,9 @@
 import { BASE_URL } from "@/src/components/BaseUrlApi";
 import { RootState } from "@/src/store/store";
-import { fetchAndSaveBoomSettings } from "@/src/utils/doorController";
+import {
+  fetchAndSaveBoomSettings,
+  triggerRemoteDoorOpen,
+} from "@/src/utils/doorController";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import axios from "axios";
@@ -9,6 +12,7 @@ import moment from "moment";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Image,
@@ -25,6 +29,9 @@ const { width } = Dimensions.get("window");
 
 const Dashboard = () => {
   const [loading, setLoading] = useState(false);
+  const [gateOperating, setGateOperating] = useState<"open" | "close" | null>(null);
+  const [gateNotice, setGateNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
   const [stats, setStats] = useState({
     inside: 0,
     exitedToday: 0,
@@ -98,6 +105,38 @@ const Dashboard = () => {
     }
   }, [companyId, authToken]);
 
+
+
+  const handleOpenBoom = async () => {
+    setGateOperating("open");
+    setGateNotice(null);
+    try {
+      const res = await triggerRemoteDoorOpen({
+        companyId: companyId || 23,
+        action: "Dashboard Manual Gate Open",
+      });
+
+      if (res.success) {
+        setGateNotice({
+          type: "success",
+          message: "Boom Gate OPEN signal sent successfully ✅",
+        });
+      } else {
+        setGateNotice({
+          type: "error",
+          message: `Failed to open gate: ${res.error || "Controller unreachable on local network"}`,
+        });
+      }
+    } catch (err: any) {
+      setGateNotice({
+        type: "error",
+        message: `Error opening gate: ${err.message || "Failed"}`,
+      });
+    } finally {
+      setGateOperating(null);
+    }
+  };
+
   const renderActivityItem = ({ item, index }: { item: any; index: number }) => {
     const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "--");
     const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
@@ -147,6 +186,63 @@ const Dashboard = () => {
           <MaterialCommunityIcons name="shield-lock-outline" size={48} color="#d4b262" />
           <Text style={styles.bannerText}>Quarry Gate Secure Terminal</Text>
           <Text style={styles.bannerSub}>Monitor real-time vehicle flow, boom gate operations, and authorization logs.</Text>
+        </View>
+
+        {/* Boom Gate Direct Remote Controls Card */}
+        <View style={styles.gateControlCard}>
+          <View style={styles.gateControlHeader}>
+            <MaterialCommunityIcons name="boom-gate" size={22} color="#0f5f3c" />
+            <Text style={styles.gateControlTitle}>Boom Gate Direct Control</Text>
+          </View>
+
+          {gateNotice && (
+            <View
+              style={[
+                styles.gateNoticeBox,
+                {
+                  backgroundColor: gateNotice.type === "success" ? "#e8f5e9" : "#ffebee",
+                  borderColor: gateNotice.type === "success" ? "#c8e6c9" : "#ffcdd2",
+                },
+              ]}
+            >
+              <Ionicons
+                name={gateNotice.type === "success" ? "checkmark-circle" : "alert-circle"}
+                size={18}
+                color={gateNotice.type === "success" ? "#2e7d32" : "#c62828"}
+              />
+              <Text
+                style={[
+                  styles.gateNoticeText,
+                  { color: gateNotice.type === "success" ? "#2e7d32" : "#c62828" },
+                ]}
+              >
+                {gateNotice.message}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.gateControlButtonsRow}>
+            {/* Direct Open Button */}
+            <TouchableOpacity
+              style={[
+                styles.gateBtn,
+                styles.gateOpenBtn,
+                gateOperating ? { opacity: 0.7 } : null,
+              ]}
+              onPress={handleOpenBoom}
+              disabled={!!gateOperating}
+              activeOpacity={0.8}
+            >
+              {gateOperating === "open" ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="boom-gate-up" size={20} color="#fff" />
+                  <Text style={styles.gateBtnText}>Open Boom Barrier</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats Grid */}
@@ -376,7 +472,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 14,
     padding: 15,
-    marginTop: 25,
+    marginTop: 20,
     elevation: 2,
   },
   shortcutTitle: {
@@ -402,6 +498,66 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginLeft: 6,
+  },
+  gateControlCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  gateControlHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  gateControlTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1e293b",
+    marginLeft: 8,
+  },
+  gateNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  gateNoticeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
+  },
+  gateControlButtonsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  gateBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 13,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    gap: 6,
+  },
+  gateOpenBtn: {
+    backgroundColor: "#0f5f3c",
+  },
+  gateBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
   },
 });
 

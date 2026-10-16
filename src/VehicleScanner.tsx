@@ -154,7 +154,6 @@ export default function VehicleInOut() {
         const doorResult = await triggerRemoteDoorOpen({
           truck: formattedTruck,
           action: "Register Entry",
-          type: "entry",
           companyId: companyId || 23,
         });
 
@@ -171,6 +170,7 @@ export default function VehicleInOut() {
             ? "Boom barrier OPEN command triggered successfully ✅"
             : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
           imageUri: vehicleImage?.uri,
+          companyId: companyId || 23,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
 
@@ -247,11 +247,11 @@ export default function VehicleInOut() {
       );
 
       if (res.data.status === "success" || res.data.success) {
+        const exitCompanyId = selectedVehicle.company_id || companyId || 23;
         const doorResult = await triggerRemoteDoorOpen({
           truck: selectedVehicle.truck,
-          action: "Vehicle Exit",
-          type: "exit",
-          companyId: selectedVehicle.company_id || companyId || 23,
+          action: "Vehicle Exit & Open Gate",
+          companyId: exitCompanyId,
         });
 
         const truckName = selectedVehicle.truck;
@@ -277,6 +277,7 @@ export default function VehicleInOut() {
           barrierMessage: doorResult.success
             ? "Boom barrier OPEN command triggered successfully ✅"
             : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+          companyId: exitCompanyId,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
       } else {

@@ -255,7 +255,6 @@ export default function OwnVehiclesScreen() {
           await triggerRemoteDoorOpen({
             truck: formattedTruck,
             action: `Own Vehicle ${actionType}`,
-            type: actionType === "EXIT" ? "exit" : "entry",
             companyId: companyId || 23,
           });
         }
@@ -325,7 +324,6 @@ export default function OwnVehiclesScreen() {
           await triggerRemoteDoorOpen({
             truck: formattedTruck,
             action: `Own Vehicle ${actionType}`,
-            type: actionType === "EXIT" ? "exit" : "entry",
             companyId: companyId || 23,
           });
         }
