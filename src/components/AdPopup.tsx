@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   learnMoreButton: {
-    backgroundColor: '#1DB954', // Green accent color
+    backgroundColor: '#2563eb', // Blue accent color
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,

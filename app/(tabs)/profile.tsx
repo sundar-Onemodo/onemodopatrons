@@ -1,11 +1,17 @@
 import { BASE_URL } from "@/src/components/BaseUrlApi";
 import { resetAuth } from "@/src/store/authSlice";
 import { RootState } from "@/src/store/store";
-import { Entypo, Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import {
+  Entypo,
+  Feather,
+  Ionicons,
+  MaterialCommunityIcons,
+} from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import {
   Alert,
   Animated,
@@ -16,15 +22,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 
 export default function Profile() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const { phNumber, emailId, username, signupCountry, authToken } = useSelector(
-    (state: RootState) => state.auth
+    (state: RootState) => state.auth,
   );
 
   const spinValue = new Animated.Value(0);
@@ -80,10 +85,16 @@ export default function Profile() {
   return (
     <View style={styles.container}>
       {/* Edge-to-Edge Status Bar Fill */}
-      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
-      <StatusBar style="light" backgroundColor="#0f5f3c" />
+      <View
+        style={{
+          height: insets.top,
+          backgroundColor: "#0f172a",
+          width: "100%",
+        }}
+      />
+      <StatusBar style="light" backgroundColor="#0f172a" />
       <LinearGradient
-        colors={["#0f5f3c", "#0a3d27"]}
+        colors={["#0f172a", "#1e3a8a"]}
         style={styles.header}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
@@ -99,15 +110,24 @@ export default function Profile() {
         </TouchableOpacity>
       </LinearGradient>
 
-      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Profile Card Header */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitial(username || "")}</Text>
+              <Text style={styles.avatarText}>
+                {getInitial(username || "")}
+              </Text>
             </View>
             <View style={styles.avatarBadge}>
-              <MaterialCommunityIcons name="shield-check" size={14} color="#fff" />
+              <MaterialCommunityIcons
+                name="shield-check"
+                size={14}
+                color="#fff"
+              />
             </View>
           </View>
           <Text style={styles.username}>{username || "Gate Operator"}</Text>
@@ -123,7 +143,7 @@ export default function Profile() {
           <View style={styles.infoCard}>
             <View style={styles.infoItem}>
               <View style={styles.infoIconContainer}>
-                <Ionicons name="id-card" size={18} color="#0f5f3c" />
+                <Ionicons name="id-card" size={18} color="#2563eb" />
               </View>
               <Text style={styles.infoLabel}>Operator ID</Text>
               <Text style={styles.infoValue} numberOfLines={1}>
@@ -135,7 +155,7 @@ export default function Profile() {
 
             <View style={styles.infoItem}>
               <View style={styles.infoIconContainer}>
-                <Ionicons name="person" size={18} color="#0f5f3c" />
+                <Ionicons name="person" size={18} color="#2563eb" />
               </View>
               <Text style={styles.infoLabel}>Username</Text>
               <Text style={styles.infoValue}>{username || "--"}</Text>
@@ -145,7 +165,7 @@ export default function Profile() {
 
             <View style={styles.infoItem}>
               <View style={styles.infoIconContainer}>
-                <Ionicons name="call" size={18} color="#0f5f3c" />
+                <Ionicons name="call" size={18} color="#2563eb" />
               </View>
               <Text style={styles.infoLabel}>Terminal Phone</Text>
               <Text style={styles.infoValue}>
@@ -156,15 +176,32 @@ export default function Profile() {
             <View style={styles.divider} />
 
             <View style={styles.infoItem}>
-              <View style={{ flexDirection: "row", width: "100%", alignItems: "center", justifyContent: "space-between" }}>
-                <View style={{ width: "40%", flexDirection: "row", alignItems: "center" }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <View
+                  style={{
+                    width: "40%",
+                    flexDirection: "row",
+                    alignItems: "center",
+                  }}
+                >
                   <View style={styles.infoIconContainer}>
-                    <Ionicons name="location" size={18} color="#0f5f3c" />
+                    <Ionicons name="location" size={18} color="#2563eb" />
                   </View>
                   <Text style={styles.infoLabel}>Site Location</Text>
                 </View>
                 <View style={{ width: "60%" }}>
-                  <Text style={styles.infoValue} ellipsizeMode="tail" numberOfLines={1}>
+                  <Text
+                    style={styles.infoValue}
+                    ellipsizeMode="tail"
+                    numberOfLines={1}
+                  >
                     {signupCountry || "Secure Quarry Terminal"}
                   </Text>
                 </View>
@@ -185,7 +222,11 @@ export default function Profile() {
               onPress={() => router.push("/(tabs)/boom" as any)}
             >
               <View style={styles.activityIcon}>
-                <MaterialCommunityIcons name="boom-gate" size={20} color="#0f5f3c" />
+                <MaterialCommunityIcons
+                  name="boom-gate"
+                  size={20}
+                  color="#2563eb"
+                />
               </View>
               <Text style={styles.activityText}>Gate Control Panel</Text>
               <Entypo name="chevron-right" size={20} color="#999" />
@@ -195,10 +236,24 @@ export default function Profile() {
 
             <TouchableOpacity
               style={styles.activityItem}
-              onPress={() => router.push("/(tabs)/logs" as any)}
+              onPress={() =>
+                router.push({
+                  pathname: "/(tabs)/boom",
+                  params: { tab: "logs" },
+                } as any)
+              }
             >
-              <View style={[styles.activityIcon, { backgroundColor: "rgba(30, 136, 229, 0.1)" }]}>
-                <MaterialCommunityIcons name="file-document" size={20} color="#1e88e5" />
+              <View
+                style={[
+                  styles.activityIcon,
+                  { backgroundColor: "rgba(30, 136, 229, 0.1)" },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="file-document"
+                  size={20}
+                  color="#1e88e5"
+                />
               </View>
               <Text style={styles.activityText}>Activity logs history</Text>
               <Entypo name="chevron-right" size={20} color="#999" />
@@ -206,9 +261,9 @@ export default function Profile() {
 
             <View style={styles.divider} />
 
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={styles.activityItem}
-              onPress={() => router.push("/(tabs)/own-vehicles" as any)}
+              onPress={() => router.push({ pathname: "/(tabs)/boom", params: { tab: "own-vehicles" } } as any)}
             >
               <View style={[styles.activityIcon, { backgroundColor: "rgba(212, 178, 98, 0.1)" }]}>
                 <MaterialCommunityIcons name="car-cog" size={20} color="#d4b262" />
@@ -230,13 +285,23 @@ export default function Profile() {
               <Entypo name="chevron-right" size={20} color="#999" />
             </TouchableOpacity>
 
-            <View style={styles.divider} />
+            <View style={styles.divider} /> */}
 
-            <TouchableOpacity style={styles.activityItem} onPress={handleLogout}>
-              <View style={[styles.activityIcon, { backgroundColor: "rgba(244, 67, 54, 0.1)" }]}>
+            <TouchableOpacity
+              style={styles.activityItem}
+              onPress={handleLogout}
+            >
+              <View
+                style={[
+                  styles.activityIcon,
+                  { backgroundColor: "rgba(244, 67, 54, 0.1)" },
+                ]}
+              >
                 <Ionicons name="log-out" size={20} color="#F44336" />
               </View>
-              <Text style={[styles.activityText, { color: "#F44336" }]}>Log Out Terminal</Text>
+              <Text style={[styles.activityText, { color: "#F44336" }]}>
+                Log Out Terminal
+              </Text>
               <Entypo name="chevron-right" size={20} color="#999" />
             </TouchableOpacity>
           </View>
@@ -279,22 +344,22 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: "rgba(15, 95, 60, 0.15)",
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
     borderWidth: 2,
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     justifyContent: "center",
     alignItems: "center",
   },
   avatarText: {
     fontSize: 32,
     fontWeight: "bold",
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   avatarBadge: {
     position: "absolute",
     bottom: 0,
     right: 0,
-    backgroundColor: "#d4b262",
+    backgroundColor: "#2563eb",
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -350,7 +415,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -382,7 +447,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,

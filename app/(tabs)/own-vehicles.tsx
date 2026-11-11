@@ -46,7 +46,13 @@ interface VehicleItem {
   mapped_at?: string;
 }
 
-export default function OwnVehiclesScreen() {
+export interface OwnVehiclesScreenProps {
+  embedded?: boolean;
+}
+
+export default function OwnVehiclesScreen({
+  embedded = false,
+}: OwnVehiclesScreenProps = {}) {
   const insets = useSafeAreaInsets();
   const [truckNumber, setTruckNumber] = useState("");
   const [vehicleType, setVehicleType] = useState("Car");
@@ -426,7 +432,7 @@ export default function OwnVehiclesScreen() {
             <MaterialCommunityIcons
               name={getVehicleIcon(item.vehicle_type)}
               size={24}
-              color="#0f5f3c"
+              color="#2563eb"
             />
           </View>
           <View style={styles.info}>
@@ -519,7 +525,7 @@ export default function OwnVehiclesScreen() {
     if (fetching && mappedList.length === 0) {
       return (
         <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#0f5f3c" />
+          <ActivityIndicator size="large" color="#2563eb" />
           <Text style={styles.emptyText}>Loading vehicles from server...</Text>
         </View>
       );
@@ -557,9 +563,13 @@ export default function OwnVehiclesScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Edge-to-Edge Status Bar Fill */}
-      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
-      <StatusBar style="light" backgroundColor="#0f5f3c" />
+      {!embedded && (
+        <>
+          {/* Edge-to-Edge Status Bar Fill */}
+          <View style={{ height: insets.top, backgroundColor: "#0f172a", width: "100%" }} />
+          <StatusBar style="light" backgroundColor="#0f172a" />
+        </>
+      )}
 
       <FlatList
         data={filteredVehicles}
@@ -586,7 +596,7 @@ export default function OwnVehiclesScreen() {
               {/* Vehicle Number */}
               <Text style={styles.label}>Vehicle Registration Number:</Text>
               <View style={styles.inputWrapper}>
-                <MaterialCommunityIcons name="card-bulleted-outline" size={22} color="#0f5f3c" />
+                <MaterialCommunityIcons name="card-bulleted-outline" size={22} color="#2563eb" />
                 <TextInput
                   style={styles.input}
                   placeholder="e.g. TN 59 AK 0001"
@@ -605,7 +615,7 @@ export default function OwnVehiclesScreen() {
                 <Switch
                   value={isOwnVehicle === 1}
                   onValueChange={(val) => setIsOwnVehicle(val ? 1 : 0)}
-                  trackColor={{ false: "#cbd5e1", true: "#0f5f3c" }}
+                  trackColor={{ false: "#cbd5e1", true: "#2563eb" }}
                   thumbColor={isOwnVehicle === 1 ? "#fff" : "#f4f3f4"}
                 />
               </View>
@@ -617,7 +627,7 @@ export default function OwnVehiclesScreen() {
                 onPress={() => setTypeModalVisible(true)}
               >
                 <Text style={styles.dropdownText}>{vehicleType}</Text>
-                <Ionicons name="chevron-down" size={20} color="#0f5f3c" />
+                <Ionicons name="chevron-down" size={20} color="#2563eb" />
               </TouchableOpacity>
 
               {/* Photo Capture Section */}
@@ -647,7 +657,7 @@ export default function OwnVehiclesScreen() {
                     style={styles.photoActionBtn}
                     onPress={() => handleCapturePhoto("form")}
                   >
-                    <Ionicons name="camera-outline" size={20} color="#0f5f3c" />
+                    <Ionicons name="camera-outline" size={20} color="#2563eb" />
                     <Text style={styles.photoActionBtnText}>Take Photo</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -695,14 +705,14 @@ export default function OwnVehiclesScreen() {
                 <Ionicons
                   name="refresh-outline"
                   size={20}
-                  color={fetching || refreshing ? "#bbb" : "#0f5f3c"}
+                  color={fetching || refreshing ? "#bbb" : "#2563eb"}
                 />
               </TouchableOpacity>
             </View>
 
             {/* SEARCH BAR */}
             <View style={styles.searchContainer}>
-              <Ionicons name="search-outline" size={20} color="#0f5f3c" style={styles.searchIcon} />
+              <Ionicons name="search-outline" size={20} color="#2563eb" style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Search by truck number (e.g. AP 21...)"
@@ -730,7 +740,7 @@ export default function OwnVehiclesScreen() {
                 <Ionicons
                   name={filterOwnOnly ? "checkbox" : "square-outline"}
                   size={16}
-                  color={filterOwnOnly ? "#0f5f3c" : "#666"}
+                  color={filterOwnOnly ? "#2563eb" : "#666"}
                   style={{ marginRight: 5 }}
                 />
                 <Text style={[styles.filterChipText, filterOwnOnly && styles.filterChipTextActive]}>
@@ -746,7 +756,7 @@ export default function OwnVehiclesScreen() {
                 <Ionicons
                   name={filterInsideOnly ? "checkbox" : "square-outline"}
                   size={16}
-                  color={filterInsideOnly ? "#0f5f3c" : "#666"}
+                  color={filterInsideOnly ? "#2563eb" : "#666"}
                   style={{ marginRight: 5 }}
                 />
                 <Text style={[styles.filterChipText, filterInsideOnly && styles.filterChipTextActive]}>
@@ -778,8 +788,8 @@ export default function OwnVehiclesScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => fetchVehiclesList(true)}
-            colors={["#0f5f3c"]}
-            tintColor="#0f5f3c"
+            colors={["#2563eb"]}
+            tintColor="#2563eb"
           />
         }
       />
@@ -851,7 +861,7 @@ export default function OwnVehiclesScreen() {
                       style={styles.photoActionBtn}
                       onPress={() => handleCapturePhoto("modal")}
                     >
-                      <Ionicons name="camera-outline" size={18} color="#0f5f3c" />
+                      <Ionicons name="camera-outline" size={18} color="#2563eb" />
                       <Text style={styles.photoActionBtnText}>Take Photo</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -944,7 +954,7 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#0f5f3c",
+    color: "#1e3a8a",
     marginTop: 10,
   },
   subHeading: {
@@ -979,14 +989,14 @@ const styles = StyleSheet.create({
     color: "#333",
   },
   apiBadge: {
-    backgroundColor: "rgba(15, 95, 60, 0.1)",
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
   },
   apiBadgeText: {
     fontSize: 11,
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
   label: {
@@ -1059,8 +1069,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#0f5f3c",
-    backgroundColor: "rgba(15, 95, 60, 0.05)",
+    borderColor: "#2563eb",
+    backgroundColor: "rgba(37, 99, 235, 0.05)",
     gap: 6,
   },
   photoActionBtnAlt: {
@@ -1070,7 +1080,7 @@ const styles = StyleSheet.create({
   photoActionBtnText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   imagePreviewContainer: {
     position: "relative",
@@ -1118,7 +1128,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
     borderRadius: 12,
     padding: 14,
     marginTop: 18,
@@ -1126,7 +1136,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitBtnEntry: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
   },
   submitBtnExit: {
     backgroundColor: "#D97706",
@@ -1204,8 +1214,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   filterChipActive: {
-    borderColor: "#0f5f3c",
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    borderColor: "#2563eb",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
   },
   filterChipText: {
     fontSize: 12,
@@ -1213,7 +1223,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   filterChipTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
   resetFilterBtn: {
@@ -1332,14 +1342,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   typeBadge: {
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   typeText: {
     fontSize: 11,
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
     textTransform: "capitalize",
   },
@@ -1375,7 +1385,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   quickActionBtnEntry: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
   },
   quickActionBtnExit: {
     backgroundColor: "#D97706",
@@ -1408,7 +1418,7 @@ const styles = StyleSheet.create({
   },
   clearFilterBtn: {
     marginTop: 14,
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1472,14 +1482,14 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f0f0f0",
   },
   modalItemActive: {
-    borderBottomColor: "#d4b262",
+    borderBottomColor: "#2563eb",
   },
   modalItemText: {
     fontSize: 14,
     color: "#444",
   },
   modalItemTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
   modalCloseButton: {

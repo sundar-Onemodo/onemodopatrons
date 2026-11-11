@@ -9,6 +9,12 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
     <View style={styles.tabContainer}>
       {state.routes.map((route: any, index: number) => {
         const { options } = descriptors[route.key];
+
+        // Explicitly hide tabs that have href: null or are logs / own-vehicles
+        if (options.href === null || route.name === 'logs' || route.name === 'own-vehicles') {
+          return null;
+        }
+
         const label = options.tabBarLabel ?? options.title ?? route.name;
         const isFocused = state.index === index;
 
@@ -30,10 +36,6 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
           icon = <MaterialCommunityIcons name="view-dashboard-outline" size={22} color={iconColor} />;
         } else if (route.name === 'boom') {
           icon = <MaterialCommunityIcons name="boom-gate-outline" size={22} color={iconColor} />;
-        } else if (route.name === 'logs') {
-          icon = <MaterialCommunityIcons name="file-document-outline" size={22} color={iconColor} />;
-        } else if (route.name === 'own-vehicles') {
-          icon = <MaterialCommunityIcons name="car-cog" size={22} color={iconColor} />;
         } else {
           icon = <SimpleLineIcons name="user" size={20} color={iconColor} />;
         }
@@ -69,8 +71,8 @@ export default function TabLayout() {
     >
       <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
       <Tabs.Screen name="boom" options={{ title: 'Gate Control' }} />
-      <Tabs.Screen name="logs" options={{ title: 'Logs' }} />
-      <Tabs.Screen name="own-vehicles" options={{ title: 'Own Vehicles' }} />
+      <Tabs.Screen name="logs" options={{ title: 'Logs', href: null }} />
+      <Tabs.Screen name="own-vehicles" options={{ title: 'Own Vehicles', href: null }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
@@ -80,7 +82,7 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: '#0f5f3c',
+    backgroundColor: '#0f172a',
     borderRadius: 35,
     padding: 6,
     margin: 8,
@@ -102,7 +104,7 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   activeTab: {
-    backgroundColor: '#d4b262',
+    backgroundColor: '#2563eb',
   },
   tabText: {
     color: '#fff',

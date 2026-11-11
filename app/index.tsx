@@ -179,12 +179,12 @@ export default function IndexScreen() {
 
   return (
     <LinearGradient
-      colors={["#03140c", "#072c1a", "#0b3d24", "#03150d"]}
+      colors={["#070D1E", "#0B1528", "#1E3A8A", "#070D1E"]}
       style={styles.container}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#03140c" />
+      <StatusBar barStyle="light-content" backgroundColor="#070D1E" />
 
       <View style={styles.centerStage}>
         {/* Background Ambient Aura Glow */}
@@ -279,18 +279,18 @@ const styles = StyleSheet.create({
     width: 260,
     height: 260,
     borderRadius: 130,
-    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    backgroundColor: "rgba(37, 99, 235, 0.15)",
     borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.2)",
+    borderColor: "rgba(59, 130, 246, 0.3)",
   },
   innerGlowRing: {
     position: "absolute",
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: "rgba(212, 178, 98, 0.15)",
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
     borderWidth: 1,
-    borderColor: "rgba(212, 178, 98, 0.3)",
+    borderColor: "rgba(56, 189, 248, 0.35)",
   },
   iconWrapper: {
     marginBottom: 24,
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
         elevation: 18,
       },
       ios: {
-        shadowColor: "#10b981",
+        shadowColor: "#2563eb",
         shadowOpacity: 0.45,
         shadowOffset: { width: 0, height: 12 },
         shadowRadius: 24,
@@ -328,12 +328,12 @@ const styles = StyleSheet.create({
   badgePill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    backgroundColor: "rgba(37, 99, 235, 0.18)",
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.35)",
+    borderColor: "rgba(59, 130, 246, 0.4)",
     marginBottom: 10,
     gap: 6,
   },
@@ -341,12 +341,12 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#10b981",
+    backgroundColor: "#38bdf8",
   },
   badgeText: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#34d399",
+    color: "#60a5fa",
     letterSpacing: 1.2,
   },
   brandTitle: {
@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
   loaderBarActive: {
     width: "60%",
     height: "100%",
-    backgroundColor: "#34d399",
+    backgroundColor: "#38bdf8",
     borderRadius: 2,
   },
   loadingText: {

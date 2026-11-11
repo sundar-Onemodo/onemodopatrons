@@ -67,8 +67,8 @@ export const GateStatusModal: React.FC<GateStatusModalProps> = ({
   const getThemeColor = () => {
     if (isError) return "#e53935";
     if (isConfirm) return "#ff9800";
-    if (isExit) return "#0f5f3c";
-    return "#0f5f3c";
+    if (isExit) return "#2563eb";
+    return "#2563eb";
   };
 
   const themeColor = getThemeColor();
@@ -173,7 +173,7 @@ export const GateStatusModal: React.FC<GateStatusModalProps> = ({
                             : "car"
                         }
                         size={16}
-                        color="#0f5f3c"
+                        color="#2563eb"
                       />
                       <Text style={styles.detailPillText}>{vehicleType}</Text>
                     </View>

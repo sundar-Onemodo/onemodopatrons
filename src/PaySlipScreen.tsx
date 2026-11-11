@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   },
   downloadBtn: {
     marginTop: 20,
-    backgroundColor: 'green',
+    backgroundColor: '#1d4ed8',
     padding: 12,
     borderRadius: 6,
     minWidth: 200,

@@ -2,12 +2,11 @@ import { BASE_URL } from "@/src/components/BaseUrlApi";
 import { RootState } from "@/src/store/store";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import axios from "axios";
 import { useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import moment from "moment";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -24,9 +23,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 
-export default function LogsScreen() {
+export interface LogsScreenProps {
+  embedded?: boolean;
+  initialSubTab?: "pending" | "exited";
+}
+
+export default function LogsScreen({
+  embedded = false,
+  initialSubTab = "pending",
+}: LogsScreenProps = {}) {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<"pending" | "exited">("pending");
+  const [activeTab, setActiveTab] = useState<"pending" | "exited">(initialSubTab);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -34,12 +41,6 @@ export default function LogsScreen() {
   const [pendingList, setPendingList] = useState<any[]>([]);
   const [exitedList, setExitedList] = useState<any[]>([]);
   const [pendingFilter, setPendingFilter] = useState<"all" | "own" | "visitor">("all");
-
-  // Dates for Exited List Filter
-  const [fromDate, setFromDate] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)); // 7 days ago
-  const [toDate, setToDate] = useState(new Date());
-  const [showFromPicker, setShowFromPicker] = useState(false);
-  const [showToPicker, setShowToPicker] = useState(false);
 
   // Photo Viewer Modal
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
@@ -75,15 +76,16 @@ export default function LogsScreen() {
     }
   };
 
-  // Fetch Exited List via GET (boomexitedlist)
+  // Fetch Exited List via GET (boomexitedlist) - Today Exited Only
   const fetchExited = async (query = "") => {
     setLoading(true);
     try {
+      const today = moment().format("YYYY-MM-DD");
       const res = await axios.get(BASE_URL + "boomexitedlist", {
         params: {
           company_id: companyId || 23,
-          from_date: moment(fromDate).format("YYYY-MM-DD"),
-          to_date: moment(toDate).format("YYYY-MM-DD"),
+          from_date: today,
+          to_date: today,
           truck: query,
           limit: 50,
           offset: 0,
@@ -116,8 +118,12 @@ export default function LogsScreen() {
   useFocusEffect(
     useCallback(() => {
       handleRefresh();
-    }, [activeTab, fromDate, toDate, companyId])
+    }, [activeTab, companyId])
   );
+
+  useEffect(() => {
+    handleRefresh();
+  }, [activeTab]);
 
   const filteredPendingList = useMemo(() => {
     if (pendingFilter === "own") {
@@ -182,7 +188,7 @@ export default function LogsScreen() {
                       : "truck"
                   }
                   size={22}
-                  color="#0f5f3c"
+                  color="#2563eb"
                 />
               </View>
             )}
@@ -233,7 +239,7 @@ export default function LogsScreen() {
             <Text
               style={[
                 styles.infoValue,
-                { color: "#0f5f3c", fontWeight: "700" },
+                { color: "#2563eb", fontWeight: "700" },
               ]}
             >
               ⏱️ {duration}
@@ -348,7 +354,7 @@ export default function LogsScreen() {
             <Text
               style={[
                 styles.infoValue,
-                { color: "#0f5f3c", fontWeight: "700" },
+                { color: "#2563eb", fontWeight: "700" },
               ]}
             >
               {duration}
@@ -388,12 +394,16 @@ export default function LogsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Edge-to-Edge Status Bar Fill */}
-      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
-      <StatusBar style="light" backgroundColor="#0f5f3c" />
-      <View style={styles.header}>
-        <Text style={styles.title}>Quarry Gate Logs</Text>
-      </View>
+      {!embedded && (
+        <>
+          {/* Edge-to-Edge Status Bar Fill */}
+          <View style={{ height: insets.top, backgroundColor: "#0f172a", width: "100%" }} />
+          <StatusBar style="light" backgroundColor="#0f172a" />
+          <View style={styles.header}>
+            <Text style={styles.title}>Quarry Gate Logs</Text>
+          </View>
+        </>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabContainer}>
@@ -416,7 +426,7 @@ export default function LogsScreen() {
           }}
         >
           <Text style={[styles.tabText, activeTab === "exited" && styles.tabTextActive]}>
-            Exited Logs ({exitedList.length})
+            Today Exited ({exitedList.length})
           </Text>
         </TouchableOpacity>
       </View>
@@ -485,7 +495,7 @@ export default function LogsScreen() {
             <Ionicons
               name="star"
               size={12}
-              color={pendingFilter === "own" ? "#0f5f3c" : "#b38a2c"}
+              color={pendingFilter === "own" ? "#2563eb" : "#b38a2c"}
               style={{ marginRight: 3 }}
             />
             <Text
@@ -531,50 +541,31 @@ export default function LogsScreen() {
         </View>
       )}
 
-      {/* Date Range Filters (Only for Exited list) */}
+      {/* Today Exited Banner (Date selection removed, showing Today only) */}
       {activeTab === "exited" && (
-        <View style={styles.dateFilterContainer}>
-          <Text style={styles.filterLabel}>Date Range:</Text>
-          <View style={styles.datesRow}>
-            <TouchableOpacity style={styles.dateButton} onPress={() => setShowFromPicker(true)}>
-              <Ionicons name="calendar-outline" size={16} color="#0f5f3c" />
-              <Text style={styles.dateButtonText}>{moment(fromDate).format("DD MMM YY")}</Text>
-            </TouchableOpacity>
-            <Text style={styles.dateDivider}>to</Text>
-            <TouchableOpacity style={styles.dateButton} onPress={() => setShowToPicker(true)}>
-              <Ionicons name="calendar-outline" size={16} color="#0f5f3c" />
-              <Text style={styles.dateButtonText}>{moment(toDate).format("DD MMM YY")}</Text>
-            </TouchableOpacity>
+        <View style={styles.todayBanner}>
+          <View style={styles.todayBannerLeft}>
+            <View style={styles.todayPulseDot} />
+            <View>
+              <Text style={styles.todayBannerTitle}>Today's Exited Records</Text>
+              <Text style={styles.todayBannerDate}>
+                {moment().format("dddd, D MMMM YYYY")}
+              </Text>
+            </View>
           </View>
-
-          {showFromPicker && (
-            <DateTimePicker
-              value={fromDate}
-              mode="date"
-              display="default"
-              onChange={(e, val) => {
-                setShowFromPicker(false);
-                if (val) setFromDate(val);
-              }}
-            />
-          )}
-
-          {showToPicker && (
-            <DateTimePicker
-              value={toDate}
-              mode="date"
-              display="default"
-              onChange={(e, val) => {
-                setShowToPicker(false);
-                if (val) setToDate(val);
-              }}
-            />
-          )}
+          <TouchableOpacity
+            style={styles.todayRefreshBtn}
+            onPress={() => fetchExited(searchQuery)}
+            disabled={loading}
+          >
+            <Ionicons name="refresh" size={15} color="#2563eb" />
+            <Text style={styles.todayRefreshText}>Refresh</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {loading ? (
-        <ActivityIndicator size="large" color="#0f5f3c" style={{ flex: 1, justifyContent: "center" }} />
+        <ActivityIndicator size="large" color="#2563eb" style={{ flex: 1, justifyContent: "center" }} />
       ) : (
         <FlatList
           data={activeTab === "pending" ? filteredPendingList : exitedList}
@@ -582,7 +573,7 @@ export default function LogsScreen() {
           keyExtractor={(item, index) => item.id?.toString() || index.toString()}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={handleRefresh} colors={["#0f5f3c"]} />
+            <RefreshControl refreshing={loading} onRefresh={handleRefresh} colors={["#2563eb"]} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
@@ -636,7 +627,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#0f5f3c",
+    color: "#1e3a8a",
   },
   tabContainer: {
     flexDirection: "row",
@@ -654,7 +645,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "transparent",
   },
   tabActive: {
-    borderBottomColor: "#d4b262",
+    borderBottomColor: "#2563eb",
   },
   tabText: {
     fontSize: 14,
@@ -662,7 +653,7 @@ const styles = StyleSheet.create({
     color: "#777",
   },
   tabTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   searchBar: {
     flexDirection: "row",
@@ -703,8 +694,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   pendingFilterChipActive: {
-    backgroundColor: "rgba(15, 95, 60, 0.1)",
-    borderColor: "#0f5f3c",
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    borderColor: "#2563eb",
   },
   pendingFilterText: {
     fontSize: 12,
@@ -712,48 +703,61 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   pendingFilterTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
-  dateFilterContainer: {
+  todayBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#fff",
-    paddingHorizontal: 15,
+    marginHorizontal: 15,
+    marginBottom: 10,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-  },
-  filterLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#666",
-  },
-  datesRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  dateButton: {
-    flexDirection: "row",
-    alignItems: "center",
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: "#fafafa",
+    borderColor: "#e0ede5",
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 2,
   },
-  dateButtonText: {
+  todayBannerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  todayPulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#28a745",
+    marginRight: 10,
+  },
+  todayBannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1e3a8a",
+  },
+  todayBannerDate: {
+    fontSize: 11,
+    color: "#666",
+    marginTop: 1,
+  },
+  todayRefreshBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+  },
+  todayRefreshText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#333",
-    marginLeft: 6,
-  },
-  dateDivider: {
-    fontSize: 12,
-    color: "#777",
-    marginHorizontal: 8,
+    color: "#2563eb",
   },
   listContent: {
     padding: 15,

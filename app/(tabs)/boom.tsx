@@ -1,21 +1,28 @@
 import { BASE_URL } from "@/src/components/BaseUrlApi";
-import { GateStatusModal, GateStatusModalProps } from "@/src/components/GateStatusModal";
+import {
+  GateStatusModal,
+  GateStatusModalProps,
+} from "@/src/components/GateStatusModal";
 import { RootState } from "@/src/store/store";
 import {
   fetchAndSaveBoomSettings,
   triggerRemoteDoorOpen,
 } from "@/src/utils/doorController";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
-import { formatVehiclePlate, normalizeVehicleInput } from "@/src/utils/vehicleFormatter";
+import {
+  formatVehiclePlate,
+  normalizeVehicleInput,
+} from "@/src/utils/vehicleFormatter";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import moment from "moment";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -29,14 +36,44 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
+import LogsScreen from "./logs";
+import OwnVehiclesScreen from "./own-vehicles";
 
 const toUrlEncoded = (obj: any) => {
   return Object.keys(obj)
     .map((key) => encodeURIComponent(key) + "=" + encodeURIComponent(obj[key]))
     .join("&");
+};
+
+const isOwnVehicleItem = (vehicle: any) => {
+  if (!vehicle) return false;
+  const flag = vehicle.is_own ?? vehicle.is_own_vehicle;
+  return (
+    Number(flag) === 1 ||
+    flag === "1" ||
+    flag === true ||
+    String(flag || "").trim().toLowerCase() === "true"
+  );
+};
+
+const extractApiErrorMessage = (payload: any, fallback: string) => {
+  if (!payload) return fallback;
+  if (payload.errors && typeof payload.errors === "object") {
+    const joined = Object.values(payload.errors)
+      .flat()
+      .filter(Boolean)
+      .join("\n");
+    if (joined) return joined;
+  }
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message.trim();
+  }
+  if (typeof payload.error === "string" && payload.error.trim()) {
+    return payload.error.trim();
+  }
+  return fallback;
 };
 
 export interface ActiveVehicleItem {
@@ -48,21 +85,44 @@ export interface ActiveVehicleItem {
 
 export default function GateControl() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [currentTab, setCurrentTab] = useState<"gate" | "logs" | "own">("gate");
   const [wheelerType, setWheelerType] = useState("6 Wheeler"); // Default truck wheeler type
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [entryImage, setEntryImage] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
+  // Sync tab if passed via router params
+  useEffect(() => {
+    if (params?.tab === "logs") {
+      setCurrentTab("logs");
+    } else if (params?.tab === "own" || params?.tab === "own-vehicles") {
+      setCurrentTab("own");
+    } else if (params?.tab === "gate") {
+      setCurrentTab("gate");
+    }
+  }, [params?.tab]);
+
+  // Refresh pending list when switching back to gate tab
+  useEffect(() => {
+    if (currentTab === "gate") {
+      fetchPendingList();
+    }
+  }, [currentTab]);
+
   // Active Vehicles from /activevehiclelist
   const [activeVehicles, setActiveVehicles] = useState<ActiveVehicleItem[]>([]);
   const [fetchingActiveVehicles, setFetchingActiveVehicles] = useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState<ActiveVehicleItem | null>(null);
+  const [selectedVehicle, setSelectedVehicle] =
+    useState<ActiveVehicleItem | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Pending List (Vehicles Inside)
   const [pendingVehicles, setPendingVehicles] = useState<any[]>([]);
   const [fetchingList, setFetchingList] = useState(false);
-  const [pendingFilter, setPendingFilter] = useState<"all" | "own" | "visitor">("all");
+  const [pendingFilter, setPendingFilter] = useState<"all" | "own" | "visitor">(
+    "all",
+  );
 
   // Wheeler Dropdown Modal
   const [wheelerModalVisible, setWheelerModalVisible] = useState(false);
@@ -78,6 +138,13 @@ export default function GateControl() {
   const [exitImage, setExitImage] = useState<any>(null);
   const [exitBarcode, setExitBarcode] = useState<string>("");
 
+  // Quick Step Refs to avoid async closure lag
+  const pendingExitImageRef = useRef<any>(null);
+  const pendingExitVehicleRef = useRef<any>(null);
+  const isScanningRef = useRef(false);
+  const isSubmittingExitRef = useRef(false);
+  const isSubmittingEntryRef = useRef(false);
+
   // Photo Viewer Modal
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState("");
@@ -90,7 +157,10 @@ export default function GateControl() {
     onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
   });
 
-  const { companyId, authToken } = useSelector((state: RootState) => state.auth);
+  const { companyId, authToken } = useSelector(
+    (state: RootState) => state.auth,
+  );
+  console.log("COMPANY ID:", companyId);
 
   const wheelers = [
     "4 Wheeler",
@@ -147,15 +217,20 @@ export default function GateControl() {
         },
       });
 
-      if ((res.data?.status === "success" || res.data?.success) && Array.isArray(res.data?.data)) {
+      if (
+        (res.data?.status === "success" || res.data?.success) &&
+        Array.isArray(res.data?.data)
+      ) {
         setActiveVehicles(res.data.data);
         await AsyncStorage.setItem(
           `active_vehicles_${companyId || 23}`,
-          JSON.stringify(res.data.data)
+          JSON.stringify(res.data.data),
         );
       } else {
         // Fallback to local cache if available
-        const localData = await AsyncStorage.getItem(`active_vehicles_${companyId || 23}`);
+        const localData = await AsyncStorage.getItem(
+          `active_vehicles_${companyId || 23}`,
+        );
         if (localData) {
           setActiveVehicles(JSON.parse(localData));
         }
@@ -163,7 +238,9 @@ export default function GateControl() {
     } catch (e) {
       console.error("Error fetching active vehicles:", e);
       try {
-        const localData = await AsyncStorage.getItem(`active_vehicles_${companyId || 23}`);
+        const localData = await AsyncStorage.getItem(
+          `active_vehicles_${companyId || 23}`,
+        );
         if (localData) {
           setActiveVehicles(JSON.parse(localData));
         }
@@ -180,7 +257,7 @@ export default function GateControl() {
       fetchPendingList();
       fetchActiveVehicles();
       fetchAndSaveBoomSettings(companyId || 23, authToken || undefined);
-    }, [companyId, authToken])
+    }, [companyId, authToken]),
   );
 
   // Filtered vehicles based on typed vehicle registration number
@@ -191,10 +268,16 @@ export default function GateControl() {
     }
     const clean = query.replace(/[^A-Z0-9]/gi, "").toUpperCase();
     return activeVehicles.filter((v) => {
-      const regClean = (v.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase();
+      const regClean = (v.registration || "")
+        .replace(/[^A-Z0-9]/gi, "")
+        .toUpperCase();
       const modelClean = (v.vehicle_model || "").toUpperCase();
       const idClean = String(v.id || "");
-      return regClean.includes(clean) || modelClean.includes(clean) || idClean.includes(clean);
+      return (
+        regClean.includes(clean) ||
+        modelClean.includes(clean) ||
+        idClean.includes(clean)
+      );
     });
   }, [activeVehicles, vehicleNumber]);
 
@@ -202,12 +285,13 @@ export default function GateControl() {
   const filteredPendingVehicles = useMemo(() => {
     if (pendingFilter === "own") {
       return pendingVehicles.filter(
-        (v) => v.is_own === 1 || v.is_own === "1" || v.is_own === true
+        (v) => v.is_own === 1 || v.is_own === "1" || v.is_own === true,
       );
     }
     if (pendingFilter === "visitor") {
       return pendingVehicles.filter(
-        (v) => v.is_own === 0 || v.is_own === "0" || v.is_own === false || !v.is_own
+        (v) =>
+          v.is_own === 0 || v.is_own === "0" || v.is_own === false || !v.is_own,
       );
     }
     return pendingVehicles;
@@ -218,7 +302,7 @@ export default function GateControl() {
     const manipResult = await ImageManipulator.manipulateAsync(
       uri,
       [{ resize: { width: 800 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
     );
     return manipResult;
   };
@@ -253,7 +337,8 @@ export default function GateControl() {
           type: "error",
           title: "Image Error",
           subtitle: "Failed to process photo image.",
-          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+          onClose: () =>
+            setStatusModal((prev) => ({ ...prev, visible: false })),
         });
       } finally {
         setLoading(false);
@@ -291,7 +376,8 @@ export default function GateControl() {
           type: "error",
           title: "Image Error",
           subtitle: "Failed to process exit vehicle photo.",
-          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+          onClose: () =>
+            setStatusModal((prev) => ({ ...prev, visible: false })),
         });
       } finally {
         setLoading(false);
@@ -321,7 +407,7 @@ export default function GateControl() {
     const matchedWheeler = wheelers.find(
       (w) =>
         w.toLowerCase() === modelLower ||
-        w.toLowerCase().replace(/\s/g, "") === modelLower.replace(/\s/g, "")
+        w.toLowerCase().replace(/\s/g, "") === modelLower.replace(/\s/g, ""),
     );
 
     if (matchedWheeler) {
@@ -356,7 +442,8 @@ export default function GateControl() {
     }
 
     const matched = activeVehicles.find(
-      (v) => (v.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() === raw
+      (v) =>
+        (v.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() === raw,
     );
     if (matched) {
       handleSelectVehicle(matched, false);
@@ -372,6 +459,86 @@ export default function GateControl() {
     }
   };
 
+  // Verify server reachability and open the boom barrier before mutating own-vehicle state
+  // so network or barrier failures abort cleanly without false entry/exit updates.
+  const runOwnVehiclePreFlightAndOpenGate = async ({
+    companyId: targetCompanyId,
+    truck,
+    action,
+    failurePrefix,
+    onFailure,
+  }: {
+    companyId: string | number;
+    truck: string;
+    action: string;
+    failurePrefix: "Entry" | "Exit";
+    onFailure: (title: string, message: string) => void;
+  }): Promise<Awaited<ReturnType<typeof triggerRemoteDoorOpen>> | null> => {
+    let preflightRes;
+    try {
+      preflightRes = await axios.get(BASE_URL + "boompendinglist", {
+        params: {
+          company_id: targetCompanyId,
+          limit: 50,
+          offset: 0,
+        },
+        headers: {
+          "User-Agent": "DashboardApp",
+        },
+        timeout: 10000,
+      });
+    } catch (preflightError: any) {
+      console.error(
+        `Own vehicle ${failurePrefix.toLowerCase()} pre-flight error:`,
+        preflightError?.response?.data || preflightError,
+      );
+      const preflightMsg = extractApiErrorMessage(
+        preflightError?.response?.data,
+        preflightError?.message
+          ? `Unable to reach server (${preflightError.message}).`
+          : "Network error while verifying server connection.",
+      );
+      onFailure(`${failurePrefix} Network Error`, preflightMsg);
+      return null;
+    }
+
+    const preflightData = preflightRes?.data;
+    const preflightFailed =
+      !preflightData ||
+      preflightData?.status === "error" ||
+      Boolean(preflightData?.errors) ||
+      !(
+        preflightData?.status === "success" || Boolean(preflightData?.success)
+      );
+
+    if (preflightFailed) {
+      onFailure(
+        `${failurePrefix} Failed`,
+        extractApiErrorMessage(
+          preflightData,
+          `Server rejected pre-${failurePrefix.toLowerCase()} connectivity check.`,
+        ),
+      );
+      return null;
+    }
+
+    const doorResult = await triggerRemoteDoorOpen({
+      truck,
+      action,
+      companyId: targetCompanyId,
+    });
+
+    if (!doorResult.success) {
+      onFailure(
+        "Boom Barrier Error",
+        doorResult.error || "Unable to open boom barrier controller.",
+      );
+      return null;
+    }
+
+    return doorResult;
+  };
+
   // Submit entry log - Pass all parameters (registration, vehicle_type, vehicle_model, is_own, vehicle_id, image, token)
   const handleEntrySubmit = async () => {
     if (!vehicleNumber.trim()) {
@@ -379,33 +546,87 @@ export default function GateControl() {
         visible: true,
         type: "error",
         title: "Vehicle Number Required",
-        subtitle: "Please enter or select a valid vehicle registration number (e.g. AP 01 TD 4321).",
+        subtitle:
+          "Please enter or select a valid vehicle registration number (e.g. AP 01 TD 4321).",
         onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
       });
       return;
     }
 
+    if (isSubmittingEntryRef.current) return;
+    isSubmittingEntryRef.current = true;
+
     const formattedTruck = formatVehiclePlate(vehicleNumber);
     setVehicleNumber(formattedTruck);
 
+    const cleanPlateRaw = formattedTruck
+      .replace(/[^A-Z0-9]/gi, "")
+      .toUpperCase();
+    const matchedVehicle =
+      selectedVehicle ||
+      activeVehicles.find(
+        (v) =>
+          (v.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() ===
+          cleanPlateRaw,
+      ) ||
+      null;
+
+    // Note: Backend validation requires ('is_own' => 'sometimes|in:1').
+    // Sending is_own="0" causes the backend error "is_own must be 1 when supplied".
+    // Therefore, only append is_own if it is an own vehicle (1). For visitor vehicles,
+    // omitting is_own lets the backend default it to visitor automatically.
+    const isOwnVehicle = isOwnVehicleItem(matchedVehicle);
+    const entryCompanyId = companyId || 23;
+
+    const showOwnEntryError = (title: string, reason: string) => {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title,
+        subtitle: `${reason}\n\nVehicle entry was not recorded and was not added to the entry list.`,
+        truck: formattedTruck,
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
+    };
+
+    let doorOpenedForOwn = false;
+    let ownDoorResult: Awaited<ReturnType<typeof triggerRemoteDoorOpen>> | null =
+      null;
+
     setLoading(true);
     try {
+      if (isOwnVehicle) {
+        ownDoorResult = await runOwnVehiclePreFlightAndOpenGate({
+          companyId: entryCompanyId,
+          truck: formattedTruck,
+          action: "Register Entry & Open Gate",
+          failurePrefix: "Entry",
+          onFailure: showOwnEntryError,
+        });
+
+        if (!ownDoorResult) {
+          return;
+        }
+
+        doorOpenedForOwn = true;
+      }
+
       const typeToSend = wheelerType;
       const now = moment().format("YYYY-MM-DD HH:mm:ss");
 
       const formData = new FormData();
-      formData.append("company_id", String(companyId || 23));
+      formData.append("company_id", String(entryCompanyId));
       formData.append("truck", formattedTruck);
       formData.append("vehicle_type", typeToSend);
       formData.append("vehicle_model", typeToSend);
       formData.append("entry_datetime", now);
 
       // Pass additional parameters if matched from /activevehiclelist
-      if (selectedVehicle?.id) {
-        formData.append("vehicle_id", String(selectedVehicle.id));
+      if (matchedVehicle?.id) {
+        formData.append("vehicle_id", String(matchedVehicle.id));
       }
-      if (selectedVehicle?.is_own !== undefined) {
-        formData.append("is_own", String(selectedVehicle.is_own));
+      if (isOwnVehicle) {
+        formData.append("is_own", "1");
       }
 
       if (entryImage?.uri) {
@@ -419,137 +640,240 @@ export default function GateControl() {
         formData.append("token", authToken);
       }
 
-      console.log(`\n================== 🚪 [BOOM ENTRY API CALL] ==================`);
+      console.log(
+        `\n================== 🚪 [BOOM ENTRY API CALL] ==================`,
+      );
       console.log(`⏰ Timestamp    : ${now}`);
       console.log(`🚗 Truck        : ${formattedTruck}`);
       console.log(`🏷️ Vehicle Type : ${typeToSend}`);
-      console.log(`🆔 Vehicle ID   : ${selectedVehicle?.id || "New Vehicle"}`);
-      console.log(`🏢 Is Own Flag  : ${selectedVehicle?.is_own ?? "0"}`);
+      console.log(`🆔 Vehicle ID   : ${matchedVehicle?.id || "New Vehicle"}`);
+      console.log(
+        `🏢 Is Own Flag  : ${isOwnVehicle ? "1" : "Omitted (Visitor)"}`,
+      );
       console.log(`🖼️ Entry Image  : ${entryImage?.uri ? "Attached" : "None"}`);
-      console.log(`==============================================================\n`);
-
-      const res = await axios.post(
-        BASE_URL + "boomentry",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            "User-Agent": "DashboardApp",
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          },
-        }
+      console.log(
+        `==============================================================\n`,
       );
 
-      if (res.data.status === "success" || res.data.success) {
-        // Trigger remote gate opening command dynamically using configured boomentry URL from boomsettings
-        const doorResult = await triggerRemoteDoorOpen({
-          truck: formattedTruck,
-          action: "Register Entry & Open Gate",
-          companyId: companyId || 23,
-        });
+      const res = await axios.post(BASE_URL + "boomentry", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "User-Agent": "DashboardApp",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        timeout: 60000,
+      });
+
+      const resData = res.data;
+      const hasError =
+        resData?.status === "error" || Boolean(resData?.errors);
+      const isSuccess =
+        !hasError &&
+        (resData?.status === "success" || resData?.success === true);
+
+      if (isSuccess) {
+        // Own vehicles already triggered the barrier before boomentry; visitors trigger after.
+        const doorResult =
+          isOwnVehicle && ownDoorResult
+            ? ownDoorResult
+            : await triggerRemoteDoorOpen({
+                truck: formattedTruck,
+                action: "Register Entry & Open Gate",
+                companyId: entryCompanyId,
+              });
 
         setStatusModal({
           visible: true,
           type: "entry_success",
           title: "Gate Entry Recorded",
-          subtitle: "Vehicle registration completed and recorded inside quarry.",
+          subtitle:
+            "Vehicle registration completed and recorded inside quarry.",
           truck: formattedTruck,
           vehicleType: typeToSend,
           timeText: moment(now).format("DD MMM, hh:mm A"),
           barrierSuccess: doorResult.success,
           barrierMessage: doorResult.success
             ? "Boom barrier OPEN command triggered successfully ✅"
-            : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+            : `Boom barrier: ${
+                doorResult.error || "Controller unreachable on local network"
+              }`,
           imageUri: entryImage?.uri,
-          companyId: companyId || 23,
-          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+          companyId: entryCompanyId,
+          onClose: () =>
+            setStatusModal((prev) => ({ ...prev, visible: false })),
         });
 
         setVehicleNumber("");
         setSelectedVehicle(null);
         setEntryImage(null);
+        setShowSuggestions(false);
         fetchPendingList();
-      } else if (res.data.status === "error") {
-        setStatusModal({
-          visible: true,
-          type: "error",
-          title: "Entry Failed",
-          subtitle:
-            res.data.message ||
-            (res.data.errors?.truck
-              ? res.data.errors.truck.join("\n")
-              : "Failed to record entry."),
-          truck: formattedTruck,
-          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
-        });
+      } else if (hasError) {
+        const errorDetail = extractApiErrorMessage(
+          resData,
+          "Failed to record entry.",
+        );
+
+        if (isOwnVehicle) {
+          const reason = doorOpenedForOwn
+            ? `${errorDetail} (Note: boom barrier was opened; verify gate status.)`
+            : errorDetail;
+          showOwnEntryError("Entry Failed", reason);
+        } else {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Entry Failed",
+            subtitle: errorDetail,
+            truck: formattedTruck,
+            onClose: () =>
+              setStatusModal((prev) => ({ ...prev, visible: false })),
+          });
+        }
+      } else {
+        const errMsg = extractApiErrorMessage(resData, "Failed to log entry.");
+        if (isOwnVehicle) {
+          const reason = doorOpenedForOwn
+            ? `${errMsg} (Note: boom barrier was opened; verify gate status.)`
+            : errMsg;
+          showOwnEntryError("Entry Error", reason);
+        } else {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Entry Error",
+            subtitle: errMsg,
+            truck: formattedTruck,
+            onClose: () =>
+              setStatusModal((prev) => ({ ...prev, visible: false })),
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error("Entry submission error:", error?.response?.data || error);
+      const serverErr = error?.response?.data;
+      const serverMsg = extractApiErrorMessage(
+        serverErr,
+        error?.message
+          ? `Something went wrong (${error.message}). Please try again.`
+          : "Something went wrong. Please try again.",
+      );
+
+      if (isOwnVehicle) {
+        const reason = doorOpenedForOwn
+          ? `${serverMsg} (Note: boom barrier was opened; verify gate status.)`
+          : serverMsg;
+        showOwnEntryError("Entry Network Error", reason);
       } else {
         setStatusModal({
           visible: true,
           type: "error",
-          title: "Entry Error",
-          subtitle: res.data.message || "Failed to log entry.",
+          title: "Submission Error",
+          subtitle: serverMsg,
           truck: formattedTruck,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
       }
-    } catch (error: any) {
-      console.error("Entry submission error:", error?.response?.data || error);
-      const serverMsg =
-        error?.response?.data?.message ||
-        error?.response?.data?.errors?.truck?.[0];
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Submission Error",
-        subtitle: serverMsg || "Something went wrong. Please try again.",
-        truck: formattedTruck,
-        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
-      });
     } finally {
+      isSubmittingEntryRef.current = false;
       setLoading(false);
     }
   };
 
   // Trigger exit (Supports Barcode Scan Exit and Direct Exit)
-  const triggerExit = async (vehicle: any, barcode?: string, imageObj?: any) => {
+  const triggerExit = async (
+    vehicle: any,
+    barcode?: string,
+    imageObj?: any,
+  ) => {
+    if (isSubmittingExitRef.current) return;
+    isSubmittingExitRef.current = true;
     setLoading(true);
+
     const now = moment().format("YYYY-MM-DD HH:mm:ss");
     const cleanBarcode = barcode ? String(barcode).trim() : "";
     const isDirectExit = !cleanBarcode || cleanBarcode === "0";
+    const isOwn = isOwnVehicleItem(vehicle);
+    const exitCompanyId = companyId || vehicle?.company_id || 23;
+    const truckLabel = vehicle?.truck || "Vehicle";
 
-    console.log(`\n================== 🚪 [BOOM EXIT API CALL] ==================`);
+    // Own-vehicle exits close the manual exit sheet before presenting errors
+    // so React Native never stacks GateStatusModal behind exitModalVisible.
+    const showOwnExitError = (title: string, reason: string) => {
+      setExitModalVisible(false);
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title,
+        subtitle: `${reason}\n\nVehicle was not moved to exit and remains in the entry list.`,
+        truck: vehicle?.truck,
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
+    };
+
+    console.log(
+      `\n================== 🚪 [BOOM EXIT API CALL] ==================`,
+    );
     console.log(`⏰ Timestamp   : ${now}`);
     console.log(`🚗 Truck       : ${vehicle?.truck}`);
-    console.log(`🔄 Exit Type   : ${isDirectExit ? "Direct Exit (barcode=0)" : "Barcode Scan Exit"}`);
+    console.log(
+      `🔄 Exit Type   : ${
+        isDirectExit ? "Direct Exit (barcode=0)" : "Barcode Scan Exit"
+      }`,
+    );
     console.log(`🏷️ Barcode     : ${isDirectExit ? "0" : cleanBarcode}`);
-    console.log(`⭐ is_own      : ${vehicle?.is_own !== undefined ? vehicle.is_own : 1}`);
+    console.log(
+      `⭐ is_own      : ${isOwn ? 1 : (vehicle?.is_own ?? 0)}`,
+    );
     console.log(`🖼️ Exit Image  : ${imageObj?.uri ? "Attached" : "None"}`);
-    console.log(`🏢 Company ID  : ${companyId || 23}`);
+    console.log(`🏢 Company ID  : ${exitCompanyId}`);
+
+    let doorOpenedForOwn = false;
+    let ownDoorResult: Awaited<ReturnType<typeof triggerRemoteDoorOpen>> | null =
+      null;
 
     try {
+      if (isOwn) {
+        if (isDirectExit && !vehicle?.truck) {
+          showOwnExitError(
+            "Exit Failed",
+            "Vehicle registration number is missing.",
+          );
+          return;
+        }
+
+        ownDoorResult = await runOwnVehiclePreFlightAndOpenGate({
+          companyId: exitCompanyId,
+          truck: truckLabel,
+          action: "Vehicle Exit & Open Gate",
+          failurePrefix: "Exit",
+          onFailure: showOwnExitError,
+        });
+
+        if (!ownDoorResult) {
+          return;
+        }
+
+        doorOpenedForOwn = true;
+      }
+
       const formData = new FormData();
 
       if (isDirectExit) {
-        // Direct Exit: send barcode: 0, is_own, truck, company_id, and optional exit_image
+        // Direct Exit: send barcode: 0, is_own (strictly omitted if not own), truck, company_id, and optional exit_image
         formData.append("barcode", "0");
-        const ownVal =
-          vehicle?.is_own !== undefined && vehicle?.is_own !== null
-            ? String(vehicle.is_own ? 1 : 0)
-            : "1";
-        formData.append("is_own", ownVal);
-        if (vehicle?.truck) {
-          formData.append("truck", vehicle.truck);
+        if (isOwn) {
+          formData.append("is_own", "1");
         }
-        formData.append("company_id", String(companyId || 23));
+        if (vehicle?.truck) {
+          formData.append("truck", formatVehiclePlate(vehicle.truck));
+        }
+        formData.append("company_id", String(exitCompanyId));
       } else {
-        // Barcode Scan Exit
+        // Barcode Scan Exit: Only append barcode.
+        // Do NOT append truck or company_id, as the server resolves the transaction strictly
+        // from the unique barcode. Sending truck triggers backend regex validation which fails.
         formData.append("barcode", cleanBarcode);
-        if (vehicle?.truck) {
-          formData.append("truck", vehicle.truck);
-        }
-        if (companyId) {
-          formData.append("company_id", String(companyId));
-        }
       }
 
       if (imageObj?.uri) {
@@ -565,46 +889,55 @@ export default function GateControl() {
       }
 
       console.log(`🌐 Endpoint  : ${BASE_URL}boomexit`);
-      const res = await axios.post(
-        BASE_URL + "boomexit",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            "User-Agent": "DashboardApp",
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          },
-        }
-      );
+      const res = await axios.post(BASE_URL + "boomexit", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "User-Agent": "DashboardApp",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        timeout: 60000,
+      });
 
-      console.log(`📦 [BOOM EXIT] Response:`, JSON.stringify(res.data, null, 2));
-      console.log(`============================================================\n`);
+      console.log(
+        `📦 [BOOM EXIT] Response:`,
+        JSON.stringify(res.data, null, 2),
+      );
+      console.log(
+        `============================================================\n`,
+      );
 
       const resData = res.data;
       const statusLabel = resData?.data?.status_label || resData?.status_label;
       const isStatusExited =
         typeof statusLabel === "string" &&
         statusLabel.trim().toLowerCase() === "exited";
+      const hasError =
+        resData?.status === "error" || Boolean(resData?.errors);
       const isSuccess =
-        resData?.status === "success" ||
-        resData?.success === true ||
-        isStatusExited;
+        !hasError &&
+        (resData?.status === "success" ||
+          resData?.success === true ||
+          isStatusExited);
 
       if (isSuccess) {
         const truckName = resData?.data?.truck || vehicle?.truck || "Vehicle";
 
-        // Trigger remote gate opening command strictly using configured boomentry URL from boomsettings
-        const exitCompanyId = companyId || vehicle?.company_id || 23;
-        const doorResult = await triggerRemoteDoorOpen({
-          truck: truckName,
-          action: "Vehicle Exit & Open Gate",
-          companyId: exitCompanyId,
-        });
+        // Own vehicles already triggered the barrier before boomexit; visitors trigger after.
+        const doorResult = isOwn && ownDoorResult
+          ? ownDoorResult
+          : await triggerRemoteDoorOpen({
+              truck: truckName,
+              action: "Vehicle Exit & Open Gate",
+              companyId: exitCompanyId,
+            });
 
         setExitModalVisible(false);
         setExitVehicle(null);
         setExitImage(null);
         setExitBarcode("");
+        pendingExitImageRef.current = null;
+        pendingExitVehicleRef.current = null;
+        isScanningRef.current = false;
 
         setStatusModal({
           visible: true,
@@ -626,49 +959,142 @@ export default function GateControl() {
           barrierSuccess: doorResult.success,
           barrierMessage: doorResult.success
             ? "Boom barrier OPEN command triggered successfully ✅"
-            : `Boom barrier: ${doorResult.error || "Controller unreachable on local network"}`,
+            : `Boom barrier: ${
+                doorResult.error || "Controller unreachable on local network"
+              }`,
           companyId: exitCompanyId,
-          onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+          onClose: () =>
+            setStatusModal((prev) => ({ ...prev, visible: false })),
         });
 
         fetchPendingList();
       } else {
+        const errorMsg = extractApiErrorMessage(
+          resData,
+          "Failed to log exit.",
+        );
+
+        if (isOwn) {
+          const reason = doorOpenedForOwn
+            ? `${errorMsg} (Note: boom barrier was opened; verify gate status.)`
+            : errorMsg;
+          showOwnExitError("Exit Failed", reason);
+        } else {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Exit Failed",
+            subtitle: errorMsg,
+            truck: vehicle?.truck,
+            onClose: () =>
+              setStatusModal((prev) => ({ ...prev, visible: false })),
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error("Exit API error:", error?.response?.data || error);
+      const serverErr = error?.response?.data;
+      const errorMsg = extractApiErrorMessage(
+        serverErr,
+        error?.message
+          ? `Failed to record exit log on server (${error.message}).`
+          : "Failed to record exit log on server.",
+      );
+
+      if (isOwn) {
+        const reason = doorOpenedForOwn
+          ? `${errorMsg} (Note: boom barrier was opened; verify gate status.)`
+          : errorMsg;
+        showOwnExitError("Exit Network Error", reason);
+      } else {
         setStatusModal({
           visible: true,
           type: "error",
-          title: "Exit Failed",
-          subtitle: resData?.message || "Failed to log exit.",
+          title: "Exit Network Error",
+          subtitle: errorMsg,
           truck: vehicle?.truck,
           onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
         });
       }
-    } catch (error: any) {
-      console.error("Exit API error:", error?.response?.data || error);
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Exit Network Error",
-        subtitle:
-          error?.response?.data?.message ||
-          "Failed to record exit log on server.",
-        truck: vehicle?.truck,
-        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
-      });
     } finally {
+      isScanningRef.current = false;
+      isSubmittingExitRef.current = false;
       setLoading(false);
     }
   };
 
-  // Exit button action click - Opens exit workflow modal
-  const handleExitPress = (item: any) => {
+  // Quick Step Process for Vehicle Exit (Step 1: Capture Photo -> Step 2: Scan Barcode -> Auto Exit & Open Gate)
+  const handleExitPress = async (item: any) => {
     setExitVehicle(item);
+    setScanningVehicle(item);
+    pendingExitVehicleRef.current = item;
+    pendingExitImageRef.current = null;
     setExitImage(null);
     setExitBarcode("");
-    setExitModalVisible(true);
+    isScanningRef.current = false;
+
+    const isTruck =
+      item.vehicle_type && item.vehicle_type.toLowerCase().includes("wheeler");
+
+    // Request camera permission for image capture
+    const imagePerm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!imagePerm.granted) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Camera Permission Required",
+        subtitle: "Camera access is needed to capture the exit vehicle photo.",
+        onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+      });
+      return;
+    }
+
+    // Step 1: Open camera image capture directly!
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets[0]?.uri) {
+        setLoading(true);
+        const compressed = await compressImage(result.assets[0].uri);
+        const imgObj = { uri: compressed.uri };
+        pendingExitImageRef.current = imgObj;
+        setExitImage(imgObj);
+        setLoading(false);
+
+        if (isTruck) {
+          // Step 2: Automatically open Barcode Scanner right after photo is taken!
+          if (!cameraPermission?.granted) {
+            const camRes = await requestCameraPermission();
+            if (camRes.granted) {
+              setScannerVisible(true);
+            } else {
+              setExitModalVisible(true);
+            }
+          } else {
+            setScannerVisible(true);
+          }
+        } else {
+          // Non-truck direct exit (e.g. Car / Bike): Immediately submit exit & open gate!
+          await triggerExit(item, "0", imgObj);
+        }
+      } else {
+        // User cancelled camera capture: show exit workflow modal for manual options
+        setExitModalVisible(true);
+      }
+    } catch (err) {
+      console.error("Quick exit camera error:", err);
+      setLoading(false);
+      setExitModalVisible(true);
+    }
   };
 
   // Open scanner for exit ticket
   const openScanner = () => {
+    isScanningRef.current = false;
+    setExitModalVisible(false);
     if (!cameraPermission?.granted) {
       requestCameraPermission().then((res) => {
         if (res.granted) {
@@ -679,7 +1105,8 @@ export default function GateControl() {
             type: "error",
             title: "Permission Required",
             subtitle: "Camera access is required to scan ticket barcode.",
-            onClose: () => setStatusModal((prev) => ({ ...prev, visible: false })),
+            onClose: () =>
+              setStatusModal((prev) => ({ ...prev, visible: false })),
           });
         }
       });
@@ -688,20 +1115,42 @@ export default function GateControl() {
     }
   };
 
-  // Barcode scanned successfully
-  const onBarcodeScanned = (event: any) => {
+  // Barcode scanned successfully - Auto-completes exit & opens gate in Quick Step Process
+  const onBarcodeScanned = async (event: any) => {
+    if (isScanningRef.current) return;
+    isScanningRef.current = true;
+
     const rawData = event?.data ?? event;
     const barcodeType = event?.type ?? "unknown";
+    const cleanBarcode = String(rawData || "").trim();
 
-    console.log(`\n================== 📷 [BARCODE SCANNED] ==================`);
+    console.log(
+      `\n================== 📷 [BARCODE SCANNED - AUTO EXIT] ==================`,
+    );
     console.log(`⏰ Timestamp   : ${new Date().toISOString()}`);
-    console.log(`🏷️ Scanned Data :`, rawData);
+    console.log(`🏷️ Scanned Data :`, cleanBarcode);
     console.log(`🔍 Barcode Type :`, barcodeType);
-    console.log(`🚗 Target Truck :`, (exitVehicle || scanningVehicle)?.truck || "Unknown");
-    console.log(`========================================================\n`);
+    console.log(
+      `🚗 Target Truck :`,
+      (pendingExitVehicleRef.current || exitVehicle || scanningVehicle)
+        ?.truck || "Unknown",
+    );
+    console.log(
+      `===================================================================\n`,
+    );
 
     setScannerVisible(false);
-    setExitBarcode(String(rawData).trim());
+    setExitBarcode(cleanBarcode);
+
+    const target =
+      pendingExitVehicleRef.current || exitVehicle || scanningVehicle;
+    const photo = pendingExitImageRef.current || exitImage;
+
+    if (target) {
+      await triggerExit(target, cleanBarcode, photo);
+    } else {
+      isScanningRef.current = false;
+    }
   };
 
   const viewPhoto = (url: string) => {
@@ -713,18 +1162,26 @@ export default function GateControl() {
   };
 
   const renderPendingItem = ({ item, index }: { item: any; index: number }) => {
-    const isTruck = item.vehicle_type && item.vehicle_type.toLowerCase().includes("wheeler");
-    const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "--");
-    const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
+    const isTruck =
+      item.vehicle_type && item.vehicle_type.toLowerCase().includes("wheeler");
+    const duration =
+      item.duration_formatted ||
+      (item.duration_minutes ? `${item.duration_minutes}m` : "--");
+    const rawImg =
+      item.entry_image_url || item.entry_image || item.image || item.photo;
     const imageUrl = resolveImageUrl(rawImg);
-    const isOwn = item.is_own === 1 || item.is_own === "1" || item.is_own === true;
+    const isOwn =
+      item.is_own === 1 || item.is_own === "1" || item.is_own === true;
 
     return (
       <View style={styles.card}>
         <View style={styles.cardContent}>
           <Text style={styles.cardNumber}>{index + 1}</Text>
           {imageUrl ? (
-            <TouchableOpacity onPress={() => viewPhoto(imageUrl)} style={styles.thumbWrap}>
+            <TouchableOpacity
+              onPress={() => viewPhoto(imageUrl)}
+              style={styles.thumbWrap}
+            >
               <Image source={{ uri: imageUrl }} style={styles.thumb} />
               <View style={styles.thumbZoomIcon}>
                 <Ionicons name="expand" size={10} color="#fff" />
@@ -741,18 +1198,33 @@ export default function GateControl() {
                     : "truck"
                 }
                 size={20}
-                color="#0f5f3c"
+                color="#2563eb"
               />
             </View>
           )}
 
           <View style={styles.cardDetails}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 4,
+              }}
+            >
               <Text style={styles.cardTruckText}>{item.truck}</Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
                 {isOwn ? (
                   <View style={styles.pendingOwnBadge}>
-                    <Ionicons name="star" size={10} color="#99731e" style={{ marginRight: 2 }} />
+                    <Ionicons
+                      name="star"
+                      size={10}
+                      color="#99731e"
+                      style={{ marginRight: 2 }}
+                    />
                     <Text style={styles.pendingOwnBadgeText}>Own Vehicle</Text>
                   </View>
                 ) : (
@@ -761,14 +1233,19 @@ export default function GateControl() {
                   </View>
                 )}
                 <View style={styles.badgeInside}>
-                  <Text style={styles.badgeInsideText}>{item.status_label || "Inside"}</Text>
+                  <Text style={styles.badgeInsideText}>
+                    {item.status_label || "Inside"}
+                  </Text>
                 </View>
               </View>
             </View>
             <Text style={styles.cardTypeText}>{item.vehicle_type}</Text>
             <View style={styles.cardMetaRow}>
               <Text style={styles.cardTimeText}>
-                In: {item.entry_datetime ? moment(item.entry_datetime).format("DD MMM, hh:mm A") : "--"}
+                In:{" "}
+                {item.entry_datetime
+                  ? moment(item.entry_datetime).format("DD MMM, hh:mm A")
+                  : "--"}
               </Text>
               <Text style={styles.cardDurationText}>⏱️ {duration}</Text>
             </View>
@@ -784,11 +1261,17 @@ export default function GateControl() {
             onPress={() => handleExitPress(item)}
           >
             {isTruck ? (
-              <MaterialCommunityIcons name="barcode-scan" size={16} color="#fff" />
+              <MaterialCommunityIcons
+                name="barcode-scan"
+                size={16}
+                color="#fff"
+              />
             ) : (
               <Ionicons name="exit-outline" size={16} color="#fff" />
             )}
-            <Text style={styles.exitButtonText}>{isTruck ? "Scan & Exit" : "Direct Exit"}</Text>
+            <Text style={styles.exitButtonText}>
+              {isTruck ? "Scan & Exit" : "Direct Exit"}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -798,327 +1281,562 @@ export default function GateControl() {
   return (
     <View style={styles.container}>
       {/* Edge-to-Edge Status Bar Fill */}
-      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
-      <StatusBar style="light" backgroundColor="#0f5f3c" />
-      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-        <Text style={styles.heading}>🚧 Gate Control Operations 🚧</Text>
+      <View
+        style={{
+          height: insets.top,
+          backgroundColor: "#0f172a",
+          width: "100%",
+        }}
+      />
+      <StatusBar style="light" backgroundColor="#0f172a" />
 
-        {/* LOG NEW ENTRY CARD */}
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Record Truck Entry</Text>
-
-          {/* Dynamic Wheeler Selector for Truck */}
-          <View style={styles.wheelerSection}>
-            <Text style={styles.inputLabel}>Select Truck Wheeler Count:</Text>
-            <TouchableOpacity
-              style={styles.dropdownTrigger}
-              onPress={() => setWheelerModalVisible(true)}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <MaterialCommunityIcons name="truck" size={20} color="#0f5f3c" />
-                <Text style={styles.dropdownTriggerText}>{wheelerType}</Text>
-              </View>
-              <Ionicons name="chevron-down" size={20} color="#0f5f3c" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Single Unified Searchable Input for Vehicle Registration Number */}
-          <View style={styles.inputLabelRow}>
-            <Text style={styles.inputLabel}>Vehicle Registration Number:</Text>
-            {activeVehicles.length > 0 && (
-              <TouchableOpacity
-                onPress={() => fetchActiveVehicles()}
-                style={styles.refreshVehiclesBtn}
-                disabled={fetchingActiveVehicles}
-              >
-                {fetchingActiveVehicles ? (
-                  <ActivityIndicator size="small" color="#0f5f3c" />
-                ) : (
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <Ionicons name="sync-outline" size={13} color="#0f5f3c" />
-                    <Text style={styles.refreshVehiclesText}>
-                      {activeVehicles.length} Registered
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Single Unified Input Box */}
-          <View
-            style={[
-              styles.singleInputWrapper,
-              showSuggestions && styles.singleInputWrapperFocused,
-            ]}
-          >
+      {/* Top Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.headerTitleRow}>
+          <View style={styles.headerIconWrap}>
             <MaterialCommunityIcons
-              name="car-search"
-              size={22}
-              color={showSuggestions ? "#0f5f3c" : "#666"}
+              name="boom-gate"
+              size={24}
+              color="#2563eb"
             />
-            <TextInput
-              style={styles.singleInput}
-              placeholder="Type or search registration (e.g. AP 01 TD 4321)"
-              placeholderTextColor="#999"
-              value={vehicleNumber}
-              onFocus={() => setShowSuggestions(true)}
-              onChangeText={handleVehicleNumberChange}
-              onBlur={handleVehicleBlur}
-              autoCapitalize="characters"
-              maxLength={20}
-            />
-            {vehicleNumber ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setVehicleNumber("");
-                  setSelectedVehicle(null);
-                  setShowSuggestions(false);
-                }}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                style={{ padding: 4 }}
-              >
-                <Ionicons name="close-circle" size={20} color="#888" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                onPress={() => setShowSuggestions(!showSuggestions)}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                style={{ padding: 4 }}
-              >
-                <Ionicons
-                  name={showSuggestions ? "chevron-up" : "chevron-down"}
-                  size={18}
-                  color="#666"
-                />
-              </TouchableOpacity>
-            )}
           </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitleText}>Gate Control Operations</Text>
+            <Text style={styles.headerSubText}>
+              Barrier Control • Quarry Traffic • Fleet
+            </Text>
+          </View>
+          <View style={styles.headerBadge}>
+            <View style={styles.headerStatusDot} />
+            <Text style={styles.headerBadgeText}>ONLINE</Text>
+          </View>
+        </View>
 
-          {/* Autocomplete Dropdown Suggestions Panel */}
-          {showSuggestions && (
-            <View style={styles.suggestionsContainer}>
-              <View style={styles.suggestionsHeader}>
-                <Text style={styles.suggestionsHeaderText}>
-                  {filteredVehicles.length > 0
-                    ? `Matching Registered Vehicles (${filteredVehicles.length})`
-                    : "No matching registered vehicle"}
-                </Text>
-                <TouchableOpacity onPress={() => setShowSuggestions(false)} style={{ padding: 4 }}>
-                  <Ionicons name="close" size={16} color="#666" />
-                </TouchableOpacity>
-              </View>
+        {/* Enhanced Modern Segmented Tab Bar */}
+        <View style={styles.tabBarWrapper}>
+          <TouchableOpacity
+            style={[
+              styles.tabButton,
+              currentTab === "gate" && styles.tabButtonActive,
+            ]}
+            onPress={() => setCurrentTab("gate")}
+            activeOpacity={0.75}
+          >
+            <View
+              style={[
+                styles.tabIconCircle,
+                currentTab === "gate" && styles.tabIconCircleActive,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="boom-gate-up"
+                size={16}
+                color={currentTab === "gate" ? "#fff" : "#2563eb"}
+              />
+            </View>
+            <Text
+              style={[
+                styles.tabButtonText,
+                currentTab === "gate" && styles.tabButtonTextActive,
+              ]}
+            >
+              Gate Control
+            </Text>
+          </TouchableOpacity>
 
-              <ScrollView
-                style={{ maxHeight: 220 }}
-                keyboardShouldPersistTaps="handled"
-                nestedScrollEnabled
+          <TouchableOpacity
+            style={[
+              styles.tabButton,
+              currentTab === "logs" && styles.tabButtonActive,
+            ]}
+            onPress={() => setCurrentTab("logs")}
+            activeOpacity={0.75}
+          >
+            <View
+              style={[
+                styles.tabIconCircle,
+                currentTab === "logs" && styles.tabIconCircleActive,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="file-document-outline"
+                size={16}
+                color={currentTab === "logs" ? "#fff" : "#2563eb"}
+              />
+            </View>
+            <Text
+              style={[
+                styles.tabButtonText,
+                currentTab === "logs" && styles.tabButtonTextActive,
+              ]}
+            >
+              Logs
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {currentTab === "gate" && (
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* LOG NEW ENTRY CARD */}
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>Record Truck Entry</Text>
+
+            {/* Dynamic Wheeler Selector for Truck */}
+            <View style={styles.wheelerSection}>
+              <Text style={styles.inputLabel}>Select Truck Wheeler Count:</Text>
+              <TouchableOpacity
+                style={styles.dropdownTrigger}
+                onPress={() => setWheelerModalVisible(true)}
               >
-                {filteredVehicles.map((item, idx) => {
-                  const isSelected =
-                    (item.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() ===
-                    vehicleNumber.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-                  const isOwn = item.is_own === 1;
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <MaterialCommunityIcons
+                    name="truck"
+                    size={20}
+                    color="#2563eb"
+                  />
+                  <Text style={styles.dropdownTriggerText}>{wheelerType}</Text>
+                </View>
+                <Ionicons name="chevron-down" size={20} color="#2563eb" />
+              </TouchableOpacity>
+            </View>
 
-                  return (
-                    <TouchableOpacity
-                      key={item.id ? `veh-${item.id}` : `veh-${idx}`}
-                      style={[
-                        styles.suggestionItem,
-                        isSelected && styles.suggestionItemActive,
-                      ]}
-                      onPress={() => handleSelectVehicle(item, true)}
+            {/* Single Unified Searchable Input for Vehicle Registration Number */}
+            <View style={styles.inputLabelRow}>
+              <Text style={styles.inputLabel}>
+                Vehicle Registration Number:
+              </Text>
+              {activeVehicles.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => fetchActiveVehicles()}
+                  style={styles.refreshVehiclesBtn}
+                  disabled={fetchingActiveVehicles}
+                >
+                  {fetchingActiveVehicles ? (
+                    <ActivityIndicator size="small" color="#2563eb" />
+                  ) : (
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center" }}
                     >
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center" }}>
-                          <View style={styles.miniIndBadge}>
-                            <Text style={styles.miniIndText}>IND</Text>
-                          </View>
-                          <Text style={styles.suggestionRegText}>{item.registration}</Text>
+                      <Ionicons name="sync-outline" size={13} color="#2563eb" />
+                      <Text style={styles.refreshVehiclesText}>
+                        {activeVehicles.length} Registered
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Single Unified Input Box */}
+            <View
+              style={[
+                styles.singleInputWrapper,
+                showSuggestions && styles.singleInputWrapperFocused,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="car-search"
+                size={22}
+                color={showSuggestions ? "#2563eb" : "#666"}
+              />
+              <TextInput
+                style={styles.singleInput}
+                placeholder="Type or search registration (e.g. AP 01 TD 4321)"
+                placeholderTextColor="#999"
+                value={vehicleNumber}
+                onFocus={() => setShowSuggestions(true)}
+                onChangeText={handleVehicleNumberChange}
+                onBlur={handleVehicleBlur}
+                autoCapitalize="characters"
+                maxLength={20}
+              />
+              {vehicleNumber ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setVehicleNumber("");
+                    setSelectedVehicle(null);
+                    setShowSuggestions(false);
+                  }}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="close-circle" size={20} color="#888" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => setShowSuggestions(!showSuggestions)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons
+                    name={showSuggestions ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color="#666"
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Autocomplete Dropdown Suggestions Panel */}
+            {showSuggestions && (
+              <View style={styles.suggestionsContainer}>
+                <View style={styles.suggestionsHeader}>
+                  <Text style={styles.suggestionsHeaderText}>
+                    {filteredVehicles.length > 0
+                      ? `Matching Registered Vehicles (${filteredVehicles.length})`
+                      : "No matching registered vehicle"}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowSuggestions(false)}
+                    style={{ padding: 4 }}
+                  >
+                    <Ionicons name="close" size={16} color="#666" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  style={{ maxHeight: 220 }}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                >
+                  {filteredVehicles.map((item, idx) => {
+                    const isSelected =
+                      (item.registration || "")
+                        .replace(/[^A-Z0-9]/gi, "")
+                        .toUpperCase() ===
+                      vehicleNumber.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+                    const isOwn = item.is_own === 1;
+
+                    return (
+                      <TouchableOpacity
+                        key={item.id ? `veh-${item.id}` : `veh-${idx}`}
+                        style={[
+                          styles.suggestionItem,
+                          isSelected && styles.suggestionItemActive,
+                        ]}
+                        onPress={() => handleSelectVehicle(item, true)}
+                      >
+                        <View style={{ flex: 1 }}>
                           <View
-                            style={[
-                              styles.suggestionOwnBadge,
-                              { backgroundColor: isOwn ? "#e8f5e9" : "#f1f5f9" },
-                            ]}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                            }}
                           >
-                            <Text
+                            <View style={styles.miniIndBadge}>
+                              <Text style={styles.miniIndText}>IND</Text>
+                            </View>
+                            <Text style={styles.suggestionRegText}>
+                              {item.registration}
+                            </Text>
+                            <View
                               style={[
-                                styles.suggestionOwnText,
-                                { color: isOwn ? "#2e7d32" : "#64748b" },
+                                styles.suggestionOwnBadge,
+                                {
+                                  backgroundColor: isOwn
+                                    ? "#e8f5e9"
+                                    : "#f1f5f9",
+                                },
                               ]}
                             >
-                              {isOwn ? "Own Fleet" : "Visitor"}
-                            </Text>
+                              <Text
+                                style={[
+                                  styles.suggestionOwnText,
+                                  { color: isOwn ? "#2e7d32" : "#64748b" },
+                                ]}
+                              >
+                                {isOwn ? "Own Fleet" : "Visitor"}
+                              </Text>
+                            </View>
                           </View>
+                          <Text style={styles.suggestionSubText}>
+                            Model: {item.vehicle_model || "Standard"}
+                          </Text>
                         </View>
-                        <Text style={styles.suggestionSubText}>
-                          Model: {item.vehicle_model || "Standard"}
-                        </Text>
-                      </View>
-                      {isSelected ? (
-                        <Ionicons name="checkmark-circle" size={20} color="#0f5f3c" />
-                      ) : (
-                        <Ionicons name="chevron-forward" size={16} color="#bbb" />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+                        {isSelected ? (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={20}
+                            color="#2563eb"
+                          />
+                        ) : (
+                          <Ionicons
+                            name="chevron-forward"
+                            size={16}
+                            color="#bbb"
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
 
-                {vehicleNumber.trim() &&
-                  !filteredVehicles.some(
-                    (v) =>
-                      (v.registration || "").replace(/[^A-Z0-9]/gi, "").toUpperCase() ===
-                      vehicleNumber.replace(/[^A-Z0-9]/gi, "").toUpperCase()
-                  ) && (
-                    <TouchableOpacity
-                      style={styles.suggestionNewItem}
-                      onPress={() => setShowSuggestions(false)}
-                    >
-                      <MaterialCommunityIcons name="plus-circle" size={18} color="#0288d1" />
-                      <View style={{ marginLeft: 8, flex: 1 }}>
-                        <Text style={styles.suggestionNewTitle}>
-                          Use: "{vehicleNumber}"
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-              </ScrollView>
-            </View>
-          )}
-
-          {/* Matched Vehicle Indicator Banner */}
-          {selectedVehicle ? (
-            <View style={styles.matchedVehicleBanner}>
-              <View style={styles.matchedVehicleHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <MaterialCommunityIcons name="check-decagram" size={18} color="#2e7d32" />
-                  <Text style={styles.matchedVehicleTitle}>Registered Vehicle</Text>
-                </View>
-                {selectedVehicle.is_own === 1 ? (
-                  <View style={styles.ownBadgeMatched}>
-                    <Ionicons name="star" size={10} color="#99731e" style={{ marginRight: 2 }} />
-                    <Text style={styles.ownBadgeMatchedText}>Own Vehicle</Text>
-                  </View>
-                ) : (
-                  <View style={styles.visitorBadgeMatched}>
-                    <Text style={styles.visitorBadgeMatchedText}>Visitor</Text>
-                  </View>
-                )}
+                  {vehicleNumber.trim() &&
+                    !filteredVehicles.some(
+                      (v) =>
+                        (v.registration || "")
+                          .replace(/[^A-Z0-9]/gi, "")
+                          .toUpperCase() ===
+                        vehicleNumber.replace(/[^A-Z0-9]/gi, "").toUpperCase(),
+                    ) && (
+                      <TouchableOpacity
+                        style={styles.suggestionNewItem}
+                        onPress={() => setShowSuggestions(false)}
+                      >
+                        <MaterialCommunityIcons
+                          name="plus-circle"
+                          size={18}
+                          color="#0288d1"
+                        />
+                        <View style={{ marginLeft: 8, flex: 1 }}>
+                          <Text style={styles.suggestionNewTitle}>
+                            Use: "{vehicleNumber}"
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                </ScrollView>
               </View>
-              <View style={styles.matchedVehicleDetailsRow}>
-                <Text style={styles.matchedVehicleDetail}>
-                  Model: <Text style={{ fontWeight: "700", color: "#0f5f3c" }}>{selectedVehicle.vehicle_model || wheelerType}</Text>
-                </Text>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Capture Entry Photo */}
-          <Text style={styles.inputLabel}>Vehicle Verification Photo:</Text>
-          {entryImage ? (
-            <View style={styles.imagePreviewContainer}>
-              <Image source={{ uri: entryImage.uri }} style={styles.imagePreview} />
-              <TouchableOpacity style={styles.removeImageButton} onPress={() => setEntryImage(null)}>
-                <Ionicons name="close-circle" size={28} color="#F44336" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity style={styles.captureButton} onPress={captureImage} disabled={loading}>
-              <Ionicons name="camera" size={24} color="#0f5f3c" />
-              <Text style={styles.captureButtonText}>Capture Entry Image</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={styles.submitButton}
-            onPress={handleEntrySubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="boom-gate-up" size={22} color="#fff" />
-                <Text style={styles.submitButtonText}>Register Entry & Open Gate</Text>
-              </>
             )}
-          </TouchableOpacity>
-        </View>
 
-        {/* PENDING VEHICLES LIST */}
-        <View style={styles.listHeaderRow}>
-          <Text style={styles.sectionTitle}>Vehicles Inside Quarry ({pendingVehicles.length})</Text>
-          <TouchableOpacity onPress={fetchPendingList} disabled={fetchingList}>
-            <Ionicons
-              name="refresh-circle"
-              size={26}
-              color="#0f5f3c"
-              style={fetchingList ? { transform: [{ rotate: "45deg" }] } : {}}
-            />
-          </TouchableOpacity>
-        </View>
+            {/* Matched Vehicle Indicator Banner */}
+            {selectedVehicle ? (
+              <View style={styles.matchedVehicleBanner}>
+                <View style={styles.matchedVehicleHeader}>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <MaterialCommunityIcons
+                      name="check-decagram"
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.matchedVehicleTitle}>
+                      Registered Vehicle
+                    </Text>
+                  </View>
+                  {selectedVehicle.is_own === 1 ? (
+                    <View style={styles.ownBadgeMatched}>
+                      <Ionicons
+                        name="star"
+                        size={10}
+                        color="#99731e"
+                        style={{ marginRight: 2 }}
+                      />
+                      <Text style={styles.ownBadgeMatchedText}>
+                        Own Vehicle
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.visitorBadgeMatched}>
+                      <Text style={styles.visitorBadgeMatchedText}>
+                        Visitor
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.matchedVehicleDetailsRow}>
+                  <Text style={styles.matchedVehicleDetail}>
+                    Model:{" "}
+                    <Text style={{ fontWeight: "700", color: "#2563eb" }}>
+                      {selectedVehicle.vehicle_model || wheelerType}
+                    </Text>
+                  </Text>
+                </View>
+              </View>
+            ) : null}
 
-        {/* Filter Chips for Pending Vehicles */}
-        {pendingVehicles.length > 0 && (
-          <View style={styles.pendingFilterRow}>
+            {/* Capture Entry Photo */}
+            <Text style={styles.inputLabel}>Vehicle Verification Photo:</Text>
+            {entryImage ? (
+              <View style={styles.imagePreviewContainer}>
+                <Image
+                  source={{ uri: entryImage.uri }}
+                  style={styles.imagePreview}
+                />
+                <TouchableOpacity
+                  style={styles.removeImageButton}
+                  onPress={() => setEntryImage(null)}
+                >
+                  <Ionicons name="close-circle" size={28} color="#F44336" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.captureButton}
+                onPress={captureImage}
+                disabled={loading}
+              >
+                <Ionicons name="camera" size={24} color="#2563eb" />
+                <Text style={styles.captureButtonText}>
+                  Capture Entry Image
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Submit Button */}
             <TouchableOpacity
-              style={[styles.pendingFilterChip, pendingFilter === "all" && styles.pendingFilterChipActive]}
-              onPress={() => setPendingFilter("all")}
+              style={styles.submitButton}
+              onPress={handleEntrySubmit}
+              disabled={loading}
             >
-              <Text style={[styles.pendingFilterText, pendingFilter === "all" && styles.pendingFilterTextActive]}>
-                All ({pendingVehicles.length})
-              </Text>
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons
+                    name="boom-gate-up"
+                    size={22}
+                    color="#fff"
+                  />
+                  <Text style={styles.submitButtonText}>
+                    Register Entry & Open Gate
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
+          </View>
 
+          {/* PENDING VEHICLES LIST */}
+          <View style={styles.listHeaderRow}>
+            <Text style={styles.sectionTitle}>
+              Vehicles Inside Quarry ({pendingVehicles.length})
+            </Text>
             <TouchableOpacity
-              style={[styles.pendingFilterChip, pendingFilter === "own" && styles.pendingFilterChipActive]}
-              onPress={() => setPendingFilter("own")}
+              onPress={fetchPendingList}
+              disabled={fetchingList}
             >
               <Ionicons
-                name="star"
-                size={12}
-                color={pendingFilter === "own" ? "#0f5f3c" : "#b38a2c"}
-                style={{ marginRight: 3 }}
+                name="refresh-circle"
+                size={26}
+                color="#2563eb"
+                style={fetchingList ? { transform: [{ rotate: "45deg" }] } : {}}
               />
-              <Text style={[styles.pendingFilterText, pendingFilter === "own" && styles.pendingFilterTextActive]}>
-                Own ({pendingVehicles.filter((v) => v.is_own === 1 || v.is_own === "1" || v.is_own === true).length})
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.pendingFilterChip, pendingFilter === "visitor" && styles.pendingFilterChipActive]}
-              onPress={() => setPendingFilter("visitor")}
-            >
-              <Text style={[styles.pendingFilterText, pendingFilter === "visitor" && styles.pendingFilterTextActive]}>
-                Visitor ({pendingVehicles.filter((v) => !v.is_own || v.is_own === 0 || v.is_own === "0").length})
-              </Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {fetchingList ? (
-          <ActivityIndicator size="large" color="#0f5f3c" style={{ marginVertical: 30 }} />
-        ) : pendingVehicles.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="check-all" size={48} color="#999" />
-            <Text style={styles.emptyText}>All vehicles have exited the quarry.</Text>
-          </View>
-        ) : filteredPendingVehicles.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="filter-remove-outline" size={38} color="#999" />
-            <Text style={styles.emptyText}>No vehicles match the selected filter.</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={filteredPendingVehicles}
-            renderItem={renderPendingItem}
-            keyExtractor={(item, index) => item.id?.toString() || index.toString()}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          />
-        )}
-      </ScrollView>
+          {/* Filter Chips for Pending Vehicles */}
+          {pendingVehicles.length > 0 && (
+            <View style={styles.pendingFilterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.pendingFilterChip,
+                  pendingFilter === "all" && styles.pendingFilterChipActive,
+                ]}
+                onPress={() => setPendingFilter("all")}
+              >
+                <Text
+                  style={[
+                    styles.pendingFilterText,
+                    pendingFilter === "all" && styles.pendingFilterTextActive,
+                  ]}
+                >
+                  All ({pendingVehicles.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.pendingFilterChip,
+                  pendingFilter === "own" && styles.pendingFilterChipActive,
+                ]}
+                onPress={() => setPendingFilter("own")}
+              >
+                <Ionicons
+                  name="star"
+                  size={12}
+                  color={pendingFilter === "own" ? "#2563eb" : "#b38a2c"}
+                  style={{ marginRight: 3 }}
+                />
+                <Text
+                  style={[
+                    styles.pendingFilterText,
+                    pendingFilter === "own" && styles.pendingFilterTextActive,
+                  ]}
+                >
+                  Own (
+                  {
+                    pendingVehicles.filter(
+                      (v) =>
+                        v.is_own === 1 || v.is_own === "1" || v.is_own === true,
+                    ).length
+                  }
+                  )
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.pendingFilterChip,
+                  pendingFilter === "visitor" && styles.pendingFilterChipActive,
+                ]}
+                onPress={() => setPendingFilter("visitor")}
+              >
+                <Text
+                  style={[
+                    styles.pendingFilterText,
+                    pendingFilter === "visitor" &&
+                      styles.pendingFilterTextActive,
+                  ]}
+                >
+                  Visitor (
+                  {
+                    pendingVehicles.filter(
+                      (v) => !v.is_own || v.is_own === 0 || v.is_own === "0",
+                    ).length
+                  }
+                  )
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {fetchingList ? (
+            <ActivityIndicator
+              size="large"
+              color="#2563eb"
+              style={{ marginVertical: 30 }}
+            />
+          ) : pendingVehicles.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="check-all" size={48} color="#999" />
+              <Text style={styles.emptyText}>
+                All vehicles have exited the quarry.
+              </Text>
+            </View>
+          ) : filteredPendingVehicles.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons
+                name="filter-remove-outline"
+                size={38}
+                color="#999"
+              />
+              <Text style={styles.emptyText}>
+                No vehicles match the selected filter.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredPendingVehicles}
+              renderItem={renderPendingItem}
+              keyExtractor={(item, index) =>
+                item.id?.toString() || index.toString()
+              }
+              scrollEnabled={false}
+              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+            />
+          )}
+        </ScrollView>
+      )}
+
+      {/* EMBEDDED LOGS TAB (Shows Inside Quarry & Today's Exited list without date selection) */}
+      {currentTab === "logs" && <LogsScreen embedded={true} />}
+
+      {/* EMBEDDED OWN VEHICLES TAB */}
+      {currentTab === "own" && <OwnVehiclesScreen embedded={true} />}
 
       {/* WHEELER SELECTION MODAL */}
       <Modal
@@ -1134,16 +1852,26 @@ export default function GateControl() {
               {wheelers.map((w) => (
                 <TouchableOpacity
                   key={w}
-                  style={[styles.modalItem, wheelerType === w && styles.modalItemActive]}
+                  style={[
+                    styles.modalItem,
+                    wheelerType === w && styles.modalItemActive,
+                  ]}
                   onPress={() => {
                     setWheelerType(w);
                     setWheelerModalVisible(false);
                   }}
                 >
-                  <Text style={[styles.modalItemText, wheelerType === w && styles.modalItemTextActive]}>
+                  <Text
+                    style={[
+                      styles.modalItemText,
+                      wheelerType === w && styles.modalItemTextActive,
+                    ]}
+                  >
                     {w}
                   </Text>
-                  {wheelerType === w && <Ionicons name="checkmark" size={20} color="#d4b262" />}
+                  {wheelerType === w && (
+                    <Ionicons name="checkmark" size={20} color="#d4b262" />
+                  )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -1157,11 +1885,14 @@ export default function GateControl() {
         </View>
       </Modal>
 
-      {/* BARCODE SCANNER MODAL */}
+      {/* BARCODE SCANNER MODAL - QUICK STEP 2 */}
       <Modal
         visible={scannerVisible}
         animationType="fade"
-        onRequestClose={() => setScannerVisible(false)}
+        onRequestClose={() => {
+          isScanningRef.current = false;
+          setScannerVisible(false);
+        }}
       >
         <View style={styles.scannerOverlay}>
           <CameraView
@@ -1172,16 +1903,105 @@ export default function GateControl() {
             }}
           />
           <View style={styles.scannerHeader}>
+            <View style={styles.scannerStepPill}>
+              <MaterialCommunityIcons
+                name="barcode-scan"
+                size={14}
+                color="#d4b262"
+              />
+              <Text style={styles.scannerStepPillText}>
+                STEP 2 OF 2 • SCAN TICKET BARCODE
+              </Text>
+            </View>
             <Text style={styles.scannerHeaderText}>Scan Ticket / Barcode</Text>
-            <Text style={styles.scannerSubtext}>
-              Exit Truck: {scanningVehicle?.truck}
+            <View style={styles.scannerTruckBadge}>
+              <Text style={styles.scannerTruckText}>
+                Truck:{" "}
+                {(
+                  pendingExitVehicleRef.current ||
+                  exitVehicle ||
+                  scanningVehicle
+                )?.truck || "Vehicle"}
+              </Text>
+            </View>
+            {pendingExitImageRef.current?.uri || exitImage?.uri ? (
+              <View style={styles.scannerPhotoTag}>
+                <Ionicons name="checkmark-circle" size={13} color="#28a745" />
+                <Text style={styles.scannerPhotoTagText}>
+                  Step 1: Vehicle Photo Attached
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.scannerFinderContainer}>
+            <View style={styles.scannerFinder} />
+            <Text style={styles.scannerFinderHint}>
+              Align barcode within the target frame
             </Text>
           </View>
-          <View style={styles.scannerFinder} />
-          <TouchableOpacity style={styles.scannerCloseButton} onPress={() => setScannerVisible(false)}>
-            <Ionicons name="close-circle" size={54} color="#fff" />
-            <Text style={styles.scannerCloseText}>Close Scanner</Text>
-          </TouchableOpacity>
+          <View style={styles.scannerBottomActions}>
+            {(() => {
+              const currentVeh =
+                pendingExitVehicleRef.current ||
+                exitVehicle ||
+                scanningVehicle;
+              const isOwn = isOwnVehicleItem(currentVeh);
+
+              return isOwn ? (
+                <TouchableOpacity
+                  style={styles.scannerDirectBtn}
+                  onPress={async () => {
+                    if (isSubmittingExitRef.current || isScanningRef.current) {
+                      return;
+                    }
+                    isScanningRef.current = true;
+                    setScannerVisible(false);
+                    const target = currentVeh;
+                    const photo = pendingExitImageRef.current || exitImage;
+                    if (target) {
+                      await triggerExit(target, "0", photo);
+                    } else {
+                      isScanningRef.current = false;
+                    }
+                  }}
+                  disabled={loading}
+                >
+                  <MaterialCommunityIcons name="flash" size={18} color="#fff" />
+                  <Text style={styles.scannerDirectBtnText}>
+                    Skip Barcode & Open Gate
+                  </Text>
+                </TouchableOpacity>
+              ) : null;
+            })()}
+
+            <TouchableOpacity
+              style={[
+                styles.scannerCloseButton,
+                (() => {
+                  const currentVeh =
+                    pendingExitVehicleRef.current ||
+                    exitVehicle ||
+                    scanningVehicle;
+                  const isOwn = isOwnVehicleItem(currentVeh);
+                  return !isOwn
+                    ? {
+                        backgroundColor: "rgba(255,255,255,0.15)",
+                        borderRadius: 10,
+                        paddingVertical: 12,
+                      }
+                    : null;
+                })(),
+              ]}
+              onPress={() => {
+                isScanningRef.current = false;
+                setScannerVisible(false);
+                setExitModalVisible(true);
+              }}
+            >
+              <Ionicons name="close-circle-outline" size={20} color="#fff" />
+              <Text style={styles.scannerCloseText}>Options / Manual Exit</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
@@ -1224,8 +2044,14 @@ export default function GateControl() {
             {/* Modal Header */}
             <View style={styles.exitModalHeaderRow}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <MaterialCommunityIcons name="boom-gate" size={24} color="#0f5f3c" />
-                <Text style={styles.exitModalTitle}>Vehicle Exit Verification</Text>
+                <MaterialCommunityIcons
+                  name="boom-gate"
+                  size={24}
+                  color="#2563eb"
+                />
+                <Text style={styles.exitModalTitle}>
+                  Vehicle Exit Verification
+                </Text>
               </View>
               <TouchableOpacity
                 onPress={() => setExitModalVisible(false)}
@@ -1247,9 +2073,16 @@ export default function GateControl() {
                 </View>
 
                 <View style={styles.exitPillRow}>
-                  {exitVehicle?.is_own === 1 || exitVehicle?.is_own === "1" || exitVehicle?.is_own === true ? (
+                  {exitVehicle?.is_own === 1 ||
+                  exitVehicle?.is_own === "1" ||
+                  exitVehicle?.is_own === true ? (
                     <View style={styles.exitOwnBadge}>
-                      <Ionicons name="star" size={12} color="#99731e" style={{ marginRight: 3 }} />
+                      <Ionicons
+                        name="star"
+                        size={12}
+                        color="#99731e"
+                        style={{ marginRight: 3 }}
+                      />
                       <Text style={styles.exitOwnBadgeText}>Own Vehicle</Text>
                     </View>
                   ) : (
@@ -1261,35 +2094,56 @@ export default function GateControl() {
                   <View style={styles.exitPill}>
                     <MaterialCommunityIcons
                       name={
-                        exitVehicle?.vehicle_type?.toLowerCase().includes("bike")
+                        exitVehicle?.vehicle_type
+                          ?.toLowerCase()
+                          .includes("bike")
                           ? "motorbike"
-                          : exitVehicle?.vehicle_type?.toLowerCase().includes("truck") ||
-                            exitVehicle?.vehicle_type?.toLowerCase().includes("wheeler")
+                          : exitVehicle?.vehicle_type
+                              ?.toLowerCase()
+                              .includes("truck") ||
+                            exitVehicle?.vehicle_type
+                              ?.toLowerCase()
+                              .includes("wheeler")
                           ? "truck"
                           : "car"
                       }
                       size={14}
-                      color="#0f5f3c"
+                      color="#2563eb"
                     />
-                    <Text style={styles.exitPillText}>{exitVehicle?.vehicle_type}</Text>
+                    <Text style={styles.exitPillText}>
+                      {exitVehicle?.vehicle_type}
+                    </Text>
                   </View>
 
                   <View style={styles.exitPill}>
-                    <Ionicons name="time-outline" size={14} color="#0f5f3c" />
+                    <Ionicons name="time-outline" size={14} color="#2563eb" />
                     <Text style={styles.exitPillText}>
-                      ⏱️ {exitVehicle?.duration_formatted || (exitVehicle?.duration_minutes ? `${exitVehicle.duration_minutes}m` : "--")}
+                      ⏱️{" "}
+                      {exitVehicle?.duration_formatted ||
+                        (exitVehicle?.duration_minutes
+                          ? `${exitVehicle.duration_minutes}m`
+                          : "--")}
                     </Text>
                   </View>
                 </View>
               </View>
 
               {/* 1. Exit Image Capture Section */}
-              <Text style={styles.exitSectionLabel}>1. Vehicle Exit Photo (exit_image):</Text>
+              <Text style={styles.exitSectionLabel}>
+                1. Vehicle Exit Photo (exit_image):
+              </Text>
               {exitImage?.uri ? (
                 <View style={styles.exitImageWrap}>
-                  <Image source={{ uri: exitImage.uri }} style={styles.exitImagePreview} />
+                  <Image
+                    source={{ uri: exitImage.uri }}
+                    style={styles.exitImagePreview}
+                  />
                   <View style={styles.exitImageOverlayRow}>
-                    <TouchableOpacity style={styles.retakeBtn} onPress={captureExitImage} disabled={loading}>
+                    <TouchableOpacity
+                      style={styles.retakeBtn}
+                      onPress={captureExitImage}
+                      disabled={loading}
+                    >
                       <Ionicons name="camera-reverse" size={16} color="#fff" />
                       <Text style={styles.retakeBtnText}>Retake Photo</Text>
                     </TouchableOpacity>
@@ -1308,63 +2162,116 @@ export default function GateControl() {
                   onPress={captureExitImage}
                   disabled={loading}
                 >
-                  <Ionicons name="camera" size={24} color="#0f5f3c" />
+                  <Ionicons name="camera" size={24} color="#2563eb" />
                   <View style={{ marginLeft: 10 }}>
-                    <Text style={styles.exitCaptureTitle}>Capture Exit Vehicle Photo</Text>
-                    <Text style={styles.exitCaptureSub}>Take photo of departing truck / vehicle</Text>
+                    <Text style={styles.exitCaptureTitle}>
+                      Capture Exit Vehicle Photo
+                    </Text>
+                    <Text style={styles.exitCaptureSub}>
+                      Take photo of departing truck / vehicle
+                    </Text>
                   </View>
                 </TouchableOpacity>
               )}
 
               {/* 2. Barcode Ticket Section */}
               <Text style={[styles.exitSectionLabel, { marginTop: 15 }]}>
-                2. Ticket Barcode ({exitVehicle?.vehicle_type?.toLowerCase().includes("wheeler") ? "Required for Trucks" : "Optional"}):
+                2. Ticket Barcode (
+                {exitVehicle?.vehicle_type?.toLowerCase().includes("wheeler")
+                  ? "Required for Trucks"
+                  : "Optional"}
+                ):
               </Text>
 
               {exitBarcode ? (
                 <View style={styles.scannedBarcodeCard}>
-                  <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
-                    <MaterialCommunityIcons name="barcode" size={24} color="#2e7d32" />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      flex: 1,
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name="barcode"
+                      size={24}
+                      color="#2e7d32"
+                    />
                     <View style={{ marginLeft: 10 }}>
-                      <Text style={styles.scannedBarcodeLabel}>Scanned Barcode</Text>
-                      <Text style={styles.scannedBarcodeValue}>{exitBarcode}</Text>
+                      <Text style={styles.scannedBarcodeLabel}>
+                        Scanned Barcode
+                      </Text>
+                      <Text style={styles.scannedBarcodeValue}>
+                        {exitBarcode}
+                      </Text>
                     </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.rescanBtn}
-                    onPress={openScanner}
-                    disabled={loading}
-                  >
-                    <Ionicons name="scan-outline" size={16} color="#0f5f3c" />
-                    <Text style={styles.rescanText}>Re-scan</Text>
-                  </TouchableOpacity>
+                  <View style={styles.scannedBadge}>
+                    <Ionicons name="checkmark-circle" size={14} color="#2e7d32" />
+                    <Text style={styles.scannedBadgeText}>Scanned</Text>
+                  </View>
                 </View>
-              ) : (
+              ) : null}
+
+              {/* Action Buttons: Scan Ticket & Confirm Exit in the Same Row */}
+              <View style={styles.exitModalActionsRow}>
                 <TouchableOpacity
-                  style={styles.scanBarcodeButton}
+                  style={[styles.scanBarcodeRowBtn, loading && { opacity: 0.7 }]}
                   onPress={openScanner}
                   disabled={loading}
                 >
-                  <MaterialCommunityIcons name="barcode-scan" size={22} color="#e65100" />
-                  <Text style={styles.scanBarcodeText}>Scan Ticket / Waybill Barcode</Text>
+                  <MaterialCommunityIcons
+                    name="barcode-scan"
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={styles.scanBarcodeRowText} numberOfLines={1}>
+                    {exitBarcode ? "Re-scan Ticket" : "Scan Ticket"}
+                  </Text>
                 </TouchableOpacity>
-              )}
 
-              {/* Action Buttons */}
-              <TouchableOpacity
-                style={[styles.confirmExitBtn, loading && { opacity: 0.7 }]}
-                onPress={() => triggerExit(exitVehicle, exitBarcode, exitImage)}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <MaterialCommunityIcons name="boom-gate-up" size={22} color="#fff" />
-                    <Text style={styles.confirmExitBtnText}>Confirm Exit & Open Barrier</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmExitRowBtn, loading && { opacity: 0.7 }]}
+                  onPress={() => {
+                    const targetVehicle =
+                      exitVehicle || pendingExitVehicleRef.current;
+                    const isOwn = isOwnVehicleItem(targetVehicle);
+                    const isTruck =
+                      targetVehicle?.vehicle_type &&
+                      targetVehicle.vehicle_type.toLowerCase().includes("wheeler");
+                    if (!isOwn && isTruck && !exitBarcode) {
+                      setStatusModal({
+                        visible: true,
+                        type: "error",
+                        title: "Barcode Required",
+                        subtitle:
+                          "Visitor trucks must have a valid ticket barcode scanned before gate exit.",
+                        truck: targetVehicle?.truck,
+                        onClose: () =>
+                          setStatusModal((prev) => ({ ...prev, visible: false })),
+                      });
+                      return;
+                    }
+                    triggerExit(targetVehicle, exitBarcode, exitImage);
+                  }}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons
+                        name="boom-gate-up"
+                        size={18}
+                        color="#fff"
+                      />
+                      <Text style={styles.confirmExitRowText} numberOfLines={1}>
+                        Confirm Exit
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity
                 style={styles.cancelExitBtn}
@@ -1389,6 +2296,116 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f5f7fa",
   },
+  headerContainer: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5ece8",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    zIndex: 10,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 12,
+  },
+  headerIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.18)",
+  },
+  headerTitleText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1e3a8a",
+    letterSpacing: 0.3,
+  },
+  headerSubText: {
+    fontSize: 11,
+    color: "#6b7280",
+    fontWeight: "500",
+    marginTop: 1,
+  },
+  headerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(40, 167, 69, 0.12)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  headerStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#28a745",
+  },
+  headerBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#1e7e34",
+    letterSpacing: 0.5,
+  },
+  tabBarWrapper: {
+    flexDirection: "row",
+    backgroundColor: "#f1f5f9",
+    borderRadius: 14,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    gap: 4,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    gap: 6,
+  },
+  tabButtonActive: {
+    backgroundColor: "#2563eb",
+    elevation: 3,
+    shadowColor: "#2563eb",
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+  },
+  tabIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tabIconCircleActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
+  tabButtonText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4a5568",
+  },
+  tabButtonTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
   scrollContainer: {
     padding: 15,
     paddingBottom: Platform.OS === "ios" ? 110 : 130,
@@ -1399,7 +2416,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 20,
     marginTop: 10,
-    color: "#0f5f3c",
+    color: "#1e3a8a",
   },
   formCard: {
     backgroundColor: "#fff",
@@ -1442,7 +2459,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   typeButtonActive: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
   },
   typeText: {
     fontSize: 11,
@@ -1493,16 +2510,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     borderStyle: "dashed",
     borderRadius: 10,
     padding: 18,
-    backgroundColor: "rgba(15, 95, 60, 0.03)",
+    backgroundColor: "rgba(37, 99, 235, 0.04)",
   },
   captureButtonText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#0f5f3c",
+    color: "#2563eb",
     marginLeft: 8,
   },
   imagePreviewContainer: {
@@ -1528,7 +2545,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
     borderRadius: 12,
     padding: 15,
     marginTop: 22,
@@ -1597,7 +2614,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 8,
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -1639,7 +2656,7 @@ const styles = StyleSheet.create({
   cardDurationText: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   cardActionRow: {
     marginTop: 10,
@@ -1704,14 +2721,14 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f0f0f0",
   },
   modalItemActive: {
-    borderBottomColor: "#d4b262",
+    borderBottomColor: "#2563eb",
   },
   modalItemText: {
     fontSize: 14,
     color: "#444",
   },
   modalItemTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
   modalCloseButton: {
@@ -1742,6 +2759,85 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#fff",
   },
+  scannerStepPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(212, 178, 98, 0.25)",
+    borderWidth: 1,
+    borderColor: "#d4b262",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    marginBottom: 8,
+    gap: 4,
+  },
+  scannerStepPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  scannerTruckBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 6,
+  },
+  scannerTruckText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  scannerPhotoTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(40, 167, 69, 0.2)",
+    borderWidth: 1,
+    borderColor: "#28a745",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginTop: 6,
+    gap: 4,
+  },
+  scannerPhotoTagText: {
+    color: "#28a745",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  scannerFinderContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scannerFinderHint: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 12,
+  },
+  scannerBottomActions: {
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === "ios" ? 40 : 25,
+    gap: 10,
+  },
+  scannerDirectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#d97706",
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+  },
+  scannerDirectBtnText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
   scannerSubtext: {
     fontSize: 14,
     color: "#ff9800",
@@ -1753,21 +2849,21 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     borderWidth: 2,
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     backgroundColor: "transparent",
     borderRadius: 12,
   },
   scannerCloseButton: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingBottom: 40,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    paddingTop: 15,
+    justifyContent: "center",
+    paddingVertical: 8,
+    gap: 6,
   },
   scannerCloseText: {
-    color: "#fff",
-    fontSize: 14,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13,
     fontWeight: "600",
-    marginTop: 6,
   },
   photoViewerOverlay: {
     flex: 1,
@@ -1805,7 +2901,7 @@ const styles = StyleSheet.create({
   exitModalTitle: {
     fontSize: 17,
     fontWeight: "bold",
-    color: "#0f5f3c",
+    color: "#1e3a8a",
     marginLeft: 8,
   },
   exitVehicleBanner: {
@@ -1879,17 +2975,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1.5,
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     borderStyle: "dashed",
     borderRadius: 12,
     padding: 14,
-    backgroundColor: "rgba(15, 95, 60, 0.04)",
+    backgroundColor: "rgba(37, 99, 235, 0.04)",
     marginBottom: 10,
   },
   exitCaptureTitle: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   exitCaptureSub: {
     fontSize: 11,
@@ -1966,7 +3062,7 @@ const styles = StyleSheet.create({
     borderColor: "#a5d6a7",
     padding: 12,
     borderRadius: 10,
-    marginBottom: 18,
+    marginBottom: 10,
   },
   scannedBarcodeLabel: {
     fontSize: 10,
@@ -1978,6 +3074,67 @@ const styles = StyleSheet.create({
     color: "#1b5e20",
     fontWeight: "bold",
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+  },
+  scannedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#c8e6c9",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 3,
+  },
+  scannedBadgeText: {
+    fontSize: 11,
+    color: "#2e7d32",
+    fontWeight: "700",
+  },
+  exitModalActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  scanBarcodeRowBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ea580c",
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 6,
+    elevation: 3,
+    shadowColor: "#ea580c",
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+  },
+  scanBarcodeRowText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  confirmExitRowBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1d4ed8",
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 6,
+    elevation: 3,
+    shadowColor: "#1d4ed8",
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+  },
+  confirmExitRowText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
   },
   rescanBtn: {
     flexDirection: "row",
@@ -1991,25 +3148,9 @@ const styles = StyleSheet.create({
   },
   rescanText: {
     fontSize: 11,
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
     marginLeft: 3,
-  },
-  confirmExitBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f5f3c",
-    borderRadius: 12,
-    paddingVertical: 14,
-    marginTop: 5,
-    elevation: 3,
-  },
-  confirmExitBtnText: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: "#fff",
-    marginLeft: 8,
   },
   cancelExitBtn: {
     alignItems: "center",
@@ -2033,12 +3174,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
   },
   refreshVehiclesText: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#0f5f3c",
+    color: "#2563eb",
     marginLeft: 4,
   },
   singleInputWrapper: {
@@ -2052,7 +3193,7 @@ const styles = StyleSheet.create({
     height: 52,
   },
   singleInputWrapperFocused: {
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     backgroundColor: "#fff",
   },
   singleInput: {
@@ -2101,7 +3242,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f1f5f9",
   },
   suggestionItemActive: {
-    backgroundColor: "rgba(15, 95, 60, 0.08)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
   },
   miniIndBadge: {
     backgroundColor: "#003893",
@@ -2256,8 +3397,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   pendingFilterChipActive: {
-    backgroundColor: "rgba(15, 95, 60, 0.1)",
-    borderColor: "#0f5f3c",
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    borderColor: "#2563eb",
   },
   pendingFilterText: {
     fontSize: 12,
@@ -2265,7 +3406,7 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   pendingFilterTextActive: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "700",
   },
   exitOwnBadge: {

@@ -4,8 +4,8 @@ import { BASE_URL } from "../components/BaseUrlApi";
 import { store } from "../store/store";
 
 export interface BoomSettings {
-  boomentry: string; // URL to OPEN the boom barrier (e.g., http://192.168.1.64:5000/relay/2/on)
-  boomexit: string;  // URL to CLOSE the boom barrier (e.g., http://192.168.1.64:5000/relay/1/on)
+  boomentry: string; // URL to OPEN the boom barrier (e.g., http://boom-entry.local:5000/relay/2/on or http://192.168.1.64:5000/relay/2/on)
+  boomexit: string;  // URL to CLOSE the boom barrier (e.g., http://boom-entry.local:5000/relay/1/on or http://192.168.1.64:5000/relay/1/on)
   company_id?: number | string;
 }
 
@@ -32,6 +32,22 @@ export interface DoorCloseContext {
 export const sanitizeBoomUrl = (rawUrl: string): string => {
   if (!rawUrl) return "";
   return rawUrl.trim().replace(/\s+/g, "");
+};
+
+/**
+ * Resolves an alternate fallback URL between mDNS hostname (boom-entry.local) and direct IP (192.168.1.64).
+ * This provides dual resilience for Android devices where mDNS (.local) is not resolved by the OS.
+ */
+export const getAlternateBoomUrl = (url: string): string | null => {
+  if (!url) return null;
+  const ipRegex = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
+  if (ipRegex.test(url)) {
+    return url.replace(ipRegex, "boom-entry.local");
+  }
+  if (url.includes("boom-entry.local")) {
+    return url.replace("boom-entry.local", "192.168.1.63");
+  }
+  return null;
 };
 
 /**
@@ -225,7 +241,34 @@ export const triggerRemoteDoorOpen = async (context?: DoorOpenContext) => {
     }
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    console.warn(`❌ [DOOR CONTROLLER] OPEN FAILED (${duration}ms)`);
+    console.warn(`❌ [DOOR CONTROLLER] OPEN FAILED (${duration}ms) on ${targetUrl}`);
+
+    // If request failed (e.g., DNS error on .local or network failure), try alternate URL fallback
+    const altUrl = getAlternateBoomUrl(targetUrl);
+    if (altUrl && altUrl !== targetUrl) {
+      console.log(`🔄 [DOOR CONTROLLER] Attempting alternate fallback URL: ${altUrl}`);
+      try {
+        const altResponse = await axios.post(altUrl, null, {
+          timeout: DOOR_CONTROLLER_TIMEOUT,
+        });
+        const altData = altResponse.data;
+        const altSuccess =
+          altResponse.status === 200 ||
+          altResponse.status === 201 ||
+          altResponse.status === 204 ||
+          altData?.code === 0 ||
+          altData?.code === "0" ||
+          altData?.success === true ||
+          altData?.message?.toLowerCase() === "success";
+
+        if (altSuccess) {
+          console.log(`✅ [DOOR CONTROLLER] Fallback URL succeeded: ${altUrl}`);
+          return { success: true, data: altData, duration: Date.now() - startTime, targetUrl: altUrl };
+        }
+      } catch (altErr: any) {
+        console.warn(`❌ [DOOR CONTROLLER] Fallback URL (${altUrl}) also failed:`, altErr.message);
+      }
+    }
 
     if (error.response) {
       console.warn(`📊 HTTP Status Code: ${error.response.status}`);
@@ -338,7 +381,34 @@ export const triggerRemoteDoorClose = async (context?: DoorCloseContext) => {
     }
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    console.warn(`❌ [DOOR CONTROLLER] CLOSE FAILED (${duration}ms)`);
+    console.warn(`❌ [DOOR CONTROLLER] CLOSE FAILED (${duration}ms) on ${targetUrl}`);
+
+    // If request failed (e.g., DNS error on .local or network failure), try alternate URL fallback
+    const altUrl = getAlternateBoomUrl(targetUrl);
+    if (altUrl && altUrl !== targetUrl) {
+      console.log(`🔄 [DOOR CONTROLLER] Attempting alternate fallback URL: ${altUrl}`);
+      try {
+        const altResponse = await axios.post(altUrl, null, {
+          timeout: DOOR_CONTROLLER_TIMEOUT,
+        });
+        const altData = altResponse.data;
+        const altSuccess =
+          altResponse.status === 200 ||
+          altResponse.status === 201 ||
+          altResponse.status === 204 ||
+          altData?.code === 0 ||
+          altData?.code === "0" ||
+          altData?.success === true ||
+          altData?.message?.toLowerCase() === "success";
+
+        if (altSuccess) {
+          console.log(`✅ [DOOR CONTROLLER] Fallback URL succeeded: ${altUrl}`);
+          return { success: true, data: altData, duration: Date.now() - startTime, targetUrl: altUrl };
+        }
+      } catch (altErr: any) {
+        console.warn(`❌ [DOOR CONTROLLER] Fallback URL (${altUrl}) also failed:`, altErr.message);
+      }
+    }
 
     if (error.response) {
       console.warn(`📊 HTTP Status Code: ${error.response.status}`);

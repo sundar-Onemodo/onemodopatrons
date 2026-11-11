@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 20,
     marginTop: 10,
-    color: "#0f5f3c",
+    color: "#1e3a8a",
   },
   subText: { marginVertical: 8, fontSize: 14, fontWeight: "600", color: "#444" },
   input: {
@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   button: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
     padding: 14,
     borderRadius: 8,
     alignItems: "center",
@@ -570,7 +570,7 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: "#fff", fontSize: 15, fontWeight: "bold" },
   captureButton: {
-    backgroundColor: "#d4b262",
+    backgroundColor: "#2563eb",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
   truck: {
     fontSize: 13,
     fontWeight: "bold",
-    color: "#0f5f3c",
+    color: "#2563eb",
   },
   durationText: {
     fontSize: 10,
@@ -670,7 +670,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   typeButtonActive: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
   },
   typeText: { marginTop: 5, fontSize: 12, fontWeight: "600", color: "#333" },
 });

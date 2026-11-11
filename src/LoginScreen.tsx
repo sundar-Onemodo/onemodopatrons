@@ -157,11 +157,11 @@ export default function LoginFlow() {
 
   return (
     <View style={styles.screenContainer}>
-      <StatusBar style="light" backgroundColor="#03140c" />
+      <StatusBar style="light" backgroundColor="#070D1E" />
 
       {/* Top Header Background Gradient */}
       <LinearGradient
-        colors={["#03140c", "#072a1a", "#0f5f3c"]}
+        colors={["#070D1E", "#0B1528", "#1E3A8A"]}
         style={[styles.headerGradient, { paddingTop: insets.top + 16 }]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
@@ -285,7 +285,7 @@ export default function LoginFlow() {
                   <Feather
                     name="lock"
                     size={18}
-                    color={focusedInput === "password" ? "#0f5f3c" : "#64748b"}
+                    color={focusedInput === "password" ? "#2563eb" : "#64748b"}
                   />
                 </View>
 
@@ -351,7 +351,7 @@ export default function LoginFlow() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={["#0f5f3c", "#0a3d27"]}
+                colors={["#2563eb", "#1d4ed8"]}
                 style={styles.loginBtnGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -375,7 +375,7 @@ export default function LoginFlow() {
               <MaterialCommunityIcons
                 name="shield-check"
                 size={16}
-                color="#0f5f3c"
+                color="#2563eb"
               />
               <Text style={styles.securityText}>
                 Protected with 256-bit encrypted access
@@ -449,12 +449,12 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#10b981",
+    backgroundColor: "#38bdf8",
   },
   statusPillText: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#34d399",
+    color: "#60a5fa",
     letterSpacing: 1.2,
   },
   brandTitle: {
@@ -550,14 +550,14 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   inputFieldFocused: {
-    borderColor: "#0f5f3c",
+    borderColor: "#2563eb",
     backgroundColor: "#ffffff",
     ...Platform.select({
       android: {
         elevation: 2,
       },
       ios: {
-        shadowColor: "#0f5f3c",
+        shadowColor: "#2563eb",
         shadowOpacity: 0.1,
         shadowOffset: { width: 0, height: 2 },
         shadowRadius: 6,
@@ -622,7 +622,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginTop: 8,
     elevation: 4,
-    shadowColor: "#0f5f3c",
+    shadowColor: "#2563eb",
     shadowOpacity: 0.3,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 8,

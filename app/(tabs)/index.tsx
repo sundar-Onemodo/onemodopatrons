@@ -6,7 +6,11 @@ import {
   triggerRemoteDoorOpen,
 } from "@/src/utils/doorController";
 import { resolveImageUrl } from "@/src/utils/imageUtils";
-import { AntDesign, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import {
+  AntDesign,
+  Ionicons,
+  MaterialCommunityIcons,
+} from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,7 +19,6 @@ import { StatusBar } from "expo-status-bar";
 import moment from "moment";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Dimensions,
   Image,
@@ -26,7 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 
 const { width } = Dimensions.get("window");
@@ -39,11 +42,13 @@ export default function HomeScreen() {
   const [time, setTime] = useState(moment().format("HH:mm A"));
   const locationName = "Secure Gate Terminal";
   const [loading, setLoading] = useState(false);
-  const [gateOperating, setGateOperating] = useState<"open" | "close" | null>(null);
+  const [gateOperating, setGateOperating] = useState<"open" | "close" | null>(
+    null,
+  );
 
   const dispatch = useDispatch();
   const { authToken, username, companyId } = useSelector(
-    (state: RootState) => state.auth
+    (state: RootState) => state.auth,
   );
 
   useEffect(() => {
@@ -70,7 +75,11 @@ export default function HomeScreen() {
       let pendingList = [];
       if (pendingRes.data.status === "success" || pendingRes.data.success) {
         pendingList = pendingRes.data.data || [];
-        setPendingCount(pendingRes.data.total_count !== undefined ? pendingRes.data.total_count : pendingList.length);
+        setPendingCount(
+          pendingRes.data.total_count !== undefined
+            ? pendingRes.data.total_count
+            : pendingList.length,
+        );
       }
 
       // 2. Fetch Exited List (today's completed logs) via GET
@@ -87,12 +96,15 @@ export default function HomeScreen() {
 
       if (exitedRes.data.status === "success" || exitedRes.data.success) {
         const exitedList = exitedRes.data.data || [];
-        setExitedCount(exitedRes.data.total_count !== undefined ? exitedRes.data.total_count : exitedList.length);
+        setExitedCount(
+          exitedRes.data.total_count !== undefined
+            ? exitedRes.data.total_count
+            : exitedList.length,
+        );
       }
 
       // Preview recent 4 inside vehicles
       setRecentVehicles(pendingList.slice(0, 4));
-
     } catch (error) {
       console.error("Error loading dashboard metrics:", error);
     } finally {
@@ -106,10 +118,8 @@ export default function HomeScreen() {
       if (companyId) {
         fetchAndSaveBoomSettings(companyId, authToken || undefined);
       }
-    }, [companyId, authToken])
+    }, [companyId, authToken]),
   );
-
-
 
   const handleOpenBoom = async () => {
     setGateOperating("open");
@@ -119,11 +129,15 @@ export default function HomeScreen() {
         action: "Dashboard Home Open Boom",
       });
       if (res.success) {
-        Alert.alert("Success ✅", "Boom barrier OPEN signal sent successfully to controller!");
+        Alert.alert(
+          "Success ✅",
+          "Boom barrier OPEN signal sent successfully to controller!",
+        );
       } else {
         Alert.alert(
           "Gate Notice ⚠️",
-          res.error || "Boom barrier controller unreachable on local Wi-Fi / LAN."
+          res.error ||
+            "Boom barrier controller unreachable on local Wi-Fi / LAN.",
         );
       }
     } catch (e: any) {
@@ -167,8 +181,14 @@ export default function HomeScreen() {
   return (
     <View style={styles.safeArea}>
       {/* Edge-to-Edge Status Bar Fill */}
-      <View style={{ height: insets.top, backgroundColor: "#0f5f3c", width: "100%" }} />
-      <StatusBar style="light" backgroundColor="#0f5f3c" />
+      <View
+        style={{
+          height: insets.top,
+          backgroundColor: "#0f172a",
+          width: "100%",
+        }}
+      />
+      <StatusBar style="light" backgroundColor="#0f172a" />
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
@@ -177,10 +197,14 @@ export default function HomeScreen() {
         <View style={styles.headerContainer}>
           <View style={styles.profileContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitial(username || "")}</Text>
+              <Text style={styles.avatarText}>
+                {getInitial(username || "")}
+              </Text>
             </View>
             <View style={styles.profileTextContainer}>
-              <Text style={styles.greeting}>Hello, {username || "Operator"}</Text>
+              <Text style={styles.greeting}>
+                Hello, {username || "Operator"}
+              </Text>
               <Text style={styles.locationText} numberOfLines={1}>
                 📍 {locationName}
               </Text>
@@ -194,7 +218,7 @@ export default function HomeScreen() {
 
         {/* Time and Date */}
         <LinearGradient
-          colors={["#0f5f3c", "#1e6042"]}
+          colors={["#0f172a", "#1e3a8a"]}
           style={styles.timeCard}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -228,7 +252,11 @@ export default function HomeScreen() {
             style={styles.quickGateBtn}
             onPress={() => router.push("/(tabs)/boom" as any)}
           >
-            <MaterialCommunityIcons name="boom-gate-up" size={18} color="#fff" />
+            <MaterialCommunityIcons
+              name="boom-gate-up"
+              size={18}
+              color="#fff"
+            />
             <Text style={styles.quickGateText}>Gate</Text>
           </TouchableOpacity>
         </View>
@@ -236,32 +264,64 @@ export default function HomeScreen() {
         {/* Counts Row */}
         <View style={styles.countsRow}>
           <TouchableOpacity
-            style={[styles.countCard, { borderLeftColor: "#0f5f3c" }]}
-            onPress={() => router.push("/(tabs)/logs" as any)}
+            style={[styles.countCard, { borderLeftColor: "#2563eb" }]}
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/boom",
+                params: { tab: "logs" },
+              } as any)
+            }
             activeOpacity={0.8}
           >
             <View style={styles.countCardHeader}>
               <Text style={styles.countTitle}>Vehicles Inside</Text>
-              <View style={[styles.countBadge, { backgroundColor: "rgba(15, 95, 60, 0.1)" }]}>
-                <MaterialCommunityIcons name="car-multiple" size={18} color="#0f5f3c" />
+              <View
+                style={[
+                  styles.countBadge,
+                  { backgroundColor: "rgba(37, 99, 235, 0.1)" },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="car-multiple"
+                  size={18}
+                  color="#2563eb"
+                />
               </View>
             </View>
-            <Text style={[styles.countValue, { color: "#0f5f3c" }]}>{pendingCount}</Text>
+            <Text style={[styles.countValue, { color: "#2563eb" }]}>
+              {pendingCount}
+            </Text>
             <Text style={styles.countSub}>Currently on-site</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.countCard, { borderLeftColor: "#28a745" }]}
-            onPress={() => router.push("/(tabs)/logs" as any)}
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/boom",
+                params: { tab: "logs" },
+              } as any)
+            }
             activeOpacity={0.8}
           >
             <View style={styles.countCardHeader}>
               <Text style={styles.countTitle}>Exited Today</Text>
-              <View style={[styles.countBadge, { backgroundColor: "rgba(40, 167, 69, 0.1)" }]}>
-                <MaterialCommunityIcons name="check-circle-outline" size={18} color="#28a745" />
+              <View
+                style={[
+                  styles.countBadge,
+                  { backgroundColor: "rgba(40, 167, 69, 0.1)" },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="check-circle-outline"
+                  size={18}
+                  color="#28a745"
+                />
               </View>
             </View>
-            <Text style={[styles.countValue, { color: "#28a745" }]}>{exitedCount}</Text>
+            <Text style={[styles.countValue, { color: "#28a745" }]}>
+              {exitedCount}
+            </Text>
             <Text style={styles.countSub}>Successfully completed</Text>
           </TouchableOpacity>
         </View>
@@ -274,8 +334,17 @@ export default function HomeScreen() {
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/boom" as any)}
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(15, 95, 60, 0.1)" }]}>
-              <MaterialCommunityIcons name="boom-gate-up" size={24} color="#0f5f3c" />
+            <View
+              style={[
+                styles.actionIconContainer,
+                { backgroundColor: "rgba(37, 99, 235, 0.1)" },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="boom-gate-up"
+                size={24}
+                color="#2563eb"
+              />
             </View>
             <Text style={styles.actionText}>Gate Entry</Text>
           </TouchableOpacity>
@@ -285,8 +354,17 @@ export default function HomeScreen() {
             style={styles.actionCard}
             onPress={() => router.push("/(tabs)/boom" as any)}
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(255, 152, 0, 0.1)" }]}>
-              <MaterialCommunityIcons name="barcode-scan" size={24} color="#ff9800" />
+            <View
+              style={[
+                styles.actionIconContainer,
+                { backgroundColor: "rgba(255, 152, 0, 0.1)" },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="barcode-scan"
+                size={24}
+                color="#ff9800"
+              />
             </View>
             <Text style={styles.actionText}>Scan & Exit</Text>
           </TouchableOpacity>
@@ -294,10 +372,24 @@ export default function HomeScreen() {
           {/* View Logs */}
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => router.push("/(tabs)/logs" as any)}
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/boom",
+                params: { tab: "logs" },
+              } as any)
+            }
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(33, 150, 243, 0.1)" }]}>
-              <MaterialCommunityIcons name="file-document-outline" size={24} color="#2196f3" />
+            <View
+              style={[
+                styles.actionIconContainer,
+                { backgroundColor: "rgba(33, 150, 243, 0.1)" },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="file-document-outline"
+                size={24}
+                color="#2196f3"
+              />
             </View>
             <Text style={styles.actionText}>View Logs</Text>
           </TouchableOpacity>
@@ -305,10 +397,24 @@ export default function HomeScreen() {
           {/* Own Vehicles */}
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => router.push("/(tabs)/own-vehicles" as any)}
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/boom",
+                params: { tab: "own-vehicles" },
+              } as any)
+            }
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: "rgba(156, 39, 176, 0.1)" }]}>
-              <MaterialCommunityIcons name="car-cog" size={24} color="#9c27b0" />
+            <View
+              style={[
+                styles.actionIconContainer,
+                { backgroundColor: "rgba(156, 39, 176, 0.1)" },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="car-cog"
+                size={24}
+                color="#9c27b0"
+              />
             </View>
             <Text style={styles.actionText}>Own Vehicles</Text>
           </TouchableOpacity>
@@ -317,7 +423,14 @@ export default function HomeScreen() {
         {/* Recent Entries Preview */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Vehicles Inside Quarry</Text>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/logs" as any)}>
+          <TouchableOpacity
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/boom",
+                params: { tab: "logs" },
+              } as any)
+            }
+          >
             <Text style={styles.seeAllLink}>See All ({pendingCount})</Text>
           </TouchableOpacity>
         </View>
@@ -329,8 +442,14 @@ export default function HomeScreen() {
           </View>
         ) : (
           recentVehicles.map((item, index) => {
-            const duration = item.duration_formatted || (item.duration_minutes ? `${item.duration_minutes}m` : "");
-            const rawImg = item.entry_image_url || item.entry_image || item.image || item.photo;
+            const duration =
+              item.duration_formatted ||
+              (item.duration_minutes ? `${item.duration_minutes}m` : "");
+            const rawImg =
+              item.entry_image_url ||
+              item.entry_image ||
+              item.image ||
+              item.photo;
             const imgUrl = resolveImageUrl(rawImg);
             return (
               <View key={item.id || index} style={styles.recentCard}>
@@ -348,22 +467,28 @@ export default function HomeScreen() {
                             : "truck"
                         }
                         size={22}
-                        color="#0f5f3c"
+                        color="#2563eb"
                       />
                     </View>
                   )}
                   <View style={styles.recentInfo}>
                     <Text style={styles.recentTruckText}>{item.truck}</Text>
-                    <Text style={styles.recentTypeText}>{item.vehicle_type}</Text>
+                    <Text style={styles.recentTypeText}>
+                      {item.vehicle_type}
+                    </Text>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
                     <View style={styles.recentTimeBadge}>
                       <Text style={styles.recentTimeText}>
-                        {item.entry_datetime ? moment(item.entry_datetime).format("hh:mm A") : ""}
+                        {item.entry_datetime
+                          ? moment(item.entry_datetime).format("hh:mm A")
+                          : ""}
                       </Text>
                     </View>
                     {duration ? (
-                      <Text style={styles.recentDurationText}>⏱️ {duration}</Text>
+                      <Text style={styles.recentDurationText}>
+                        ⏱️ {duration}
+                      </Text>
                     ) : null}
                   </View>
                 </View>
@@ -506,7 +631,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0f5f3c",
+    color: "#1e3a8a",
     marginBottom: 12,
     marginTop: 10,
   },
@@ -518,7 +643,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   seeAllLink: {
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "600",
     fontSize: 13,
   },
@@ -573,7 +698,7 @@ const styles = StyleSheet.create({
   quickGateBtn: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1d4ed8",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -699,7 +824,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(15, 95, 60, 0.1)",
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -730,7 +855,7 @@ const styles = StyleSheet.create({
   },
   recentDurationText: {
     fontSize: 10,
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "600",
     marginTop: 3,
   },

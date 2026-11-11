@@ -33,8 +33,8 @@ export default function RootLayout() {
     <Provider store={store}>
       <PersistGate
         loading={
-          <View style={{ flex: 1, backgroundColor: '#03140c', justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" color="#10b981" />
+          <View style={{ flex: 1, backgroundColor: '#070D1E', justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#3B82F6" />
           </View>
         }
         persistor={persistor}
@@ -43,7 +43,7 @@ export default function RootLayout() {
         {rehydrated && (
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <MainLayout />
-            <StatusBar style="light" backgroundColor="#03140c" />
+            <StatusBar style="light" backgroundColor="#070D1E" />
           </ThemeProvider>
         )}
       </PersistGate>

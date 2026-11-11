@@ -172,18 +172,18 @@ const Dashboard = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#0f5f3c" />
+          <Ionicons name="arrow-back" size={24} color="#1d4ed8" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Operations Control Panel</Text>
         <TouchableOpacity style={styles.refreshBtn} onPress={fetchMetrics} disabled={loading}>
-          <Ionicons name="refresh" size={22} color="#0f5f3c" />
+          <Ionicons name="refresh" size={22} color="#1d4ed8" />
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Main Banner */}
         <View style={styles.banner}>
-          <MaterialCommunityIcons name="shield-lock-outline" size={48} color="#d4b262" />
+          <MaterialCommunityIcons name="shield-lock-outline" size={48} color="#38bdf8" />
           <Text style={styles.bannerText}>Quarry Gate Secure Terminal</Text>
           <Text style={styles.bannerSub}>Monitor real-time vehicle flow, boom gate operations, and authorization logs.</Text>
         </View>
@@ -191,7 +191,7 @@ const Dashboard = () => {
         {/* Boom Gate Direct Remote Controls Card */}
         <View style={styles.gateControlCard}>
           <View style={styles.gateControlHeader}>
-            <MaterialCommunityIcons name="boom-gate" size={22} color="#0f5f3c" />
+            <MaterialCommunityIcons name="boom-gate" size={22} color="#1d4ed8" />
             <Text style={styles.gateControlTitle}>Boom Gate Direct Control</Text>
           </View>
 
@@ -265,7 +265,7 @@ const Dashboard = () => {
         {/* Live Terminal Flow */}
         <View style={styles.listHeaderRow}>
           <Text style={styles.sectionTitle}>Inside Quarry (Live Preview)</Text>
-          {loading && <ActivityIndicator size="small" color="#0f5f3c" />}
+          {loading && <ActivityIndicator size="small" color="#1d4ed8" />}
         </View>
 
         {recentEntries.length === 0 ? (
@@ -288,16 +288,16 @@ const Dashboard = () => {
           <Text style={styles.shortcutTitle}>Operations Quick Redirects</Text>
           <View style={styles.shortcutRow}>
             <TouchableOpacity
-              style={[styles.shortcutBtn, { backgroundColor: "#e8f5e9" }]}
+              style={[styles.shortcutBtn, { backgroundColor: "#eff6ff" }]}
               onPress={() => router.push("/(tabs)/boom" as any)}
             >
-              <MaterialCommunityIcons name="boom-gate" size={20} color="#0f5f3c" />
-              <Text style={[styles.shortcutBtnText, { color: "#0f5f3c" }]}>Gate Control</Text>
+              <MaterialCommunityIcons name="boom-gate" size={20} color="#1d4ed8" />
+              <Text style={[styles.shortcutBtnText, { color: "#1d4ed8" }]}>Gate Control</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.shortcutBtn, { backgroundColor: "#e3f2fd" }]}
-              onPress={() => router.push("/(tabs)/logs" as any)}
+              onPress={() => router.push({ pathname: "/(tabs)/boom", params: { tab: "logs" } } as any)}
             >
               <MaterialCommunityIcons name="file-document" size={20} color="#007bff" />
               <Text style={[styles.shortcutBtnText, { color: "#007bff" }]}>Activity Logs</Text>
@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   banner: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#1e3a8a",
     borderRadius: 16,
     padding: 22,
     alignItems: "center",
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   },
   activityDurationText: {
     fontSize: 10,
-    color: "#0f5f3c",
+    color: "#2563eb",
     fontWeight: "600",
     marginTop: 2,
   },
@@ -552,7 +552,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   gateOpenBtn: {
-    backgroundColor: "#0f5f3c",
+    backgroundColor: "#2563eb",
   },
   gateBtnText: {
     color: "#fff",
